@@ -2,14 +2,17 @@
 
 A local-first, open-source guitar practice engine. **Working name; pre-alpha.**
 
-This first implementation is a Go library plus CLI. It imports PCM WAV songs,
-saves versioned practice projects, sets independent speed/pitch and A/B loops,
-extracts waveform peaks, renders practice audio through Signalsmith Stretch,
-and plays it through miniaudio. There is no server, account or audio upload.
+Riffine is a local-first guitar practice app. The repository contains a Go
+library and CLI plus an early React, TypeScript and Vite music-library client.
+The client lets a user choose a local music folder and reads common embedded
+tags in the browser. Audio files are not uploaded. The Go CLI imports PCM WAV
+songs, saves versioned practice projects, sets independent speed/pitch and A/B
+loops, extracts waveform peaks, renders practice audio through Signalsmith
+Stretch, and plays it through miniaudio.
 
-Playback renders the selection to a temporary WAV first. Parameters are not
-changed interactively during playback yet. Browser, Wails and WinUI clients are
-deliberately absent from this phase.
+The browser client is an early UI slice: practice controls and playback are not
+connected yet. The current CLI playback renders the selection to a temporary
+WAV first; parameters are not changed interactively during playback.
 
 ## Build
 
@@ -19,6 +22,17 @@ The core/CLI needs Go 1.24+ and has no external Go dependencies:
 go test ./...
 go build -o bin/riffine ./cmd/riffine
 ```
+
+The local web client requires Node.js and npm:
+
+```sh
+cd web
+npm install
+npm run dev
+```
+
+The Vite development server listens on localhost. Folder access and tag reading
+run in the browser; audio files are not sent to a backend.
 
 On Windows use `bin/riffine.exe` as the output name.
 
@@ -89,6 +103,7 @@ internal/cli/     Flags and presentation
 native/          C ABI, Signalsmith/miniaudio implementation and helper
 scripts/         Build and test commands
 docs/            Implementation plan, ADRs and validation
+web/             React + TypeScript local music-library client
 ```
 
 See [the implementation plan](docs/implementation-plan.md),
