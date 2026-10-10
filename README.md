@@ -12,7 +12,10 @@ Stretch, and plays it through miniaudio.
 
 The browser client is an early UI slice: practice controls and playback are not
 connected yet. The current CLI playback renders the selection to a temporary
-WAV first; parameters are not changed interactively during playback.
+WAV first; parameters are not changed interactively during playback. The native
+processing layer now also has an experimental [bounded streaming DSP API](native/include/riffine_stream.h)
+and PCM queue; [its validation record](docs/validation/streaming-dsp.md) tracks
+worker checks and the remaining device/transport work.
 
 ## Build
 
