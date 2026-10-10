@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/NLstn/riffine/core/audio"
+	"github.com/NLstn/riffine/adapters/filesystem"
 	"github.com/NLstn/riffine/core/engine"
 )
 
@@ -59,7 +59,7 @@ func (a Adapter) run(ctx context.Context, args ...string) error {
 	return nil
 }
 func (a Adapter) Render(ctx context.Context, r engine.RenderRequest) error {
-	i, err := audio.Inspect(r.Source)
+	i, err := filesystem.Inspect(ctx, r.Source)
 	if err != nil {
 		return err
 	}
@@ -81,7 +81,7 @@ func (a Adapter) Render(ctx context.Context, r engine.RenderRequest) error {
 	if err = a.run(ctx, args...); err != nil {
 		return err
 	}
-	out, err := audio.Inspect(tmp)
+	out, err := filesystem.Inspect(ctx, tmp)
 	if err != nil {
 		return fmt.Errorf("invalid rendered audio: %w", err)
 	}
@@ -118,7 +118,7 @@ func (a Adapter) Render(ctx context.Context, r engine.RenderRequest) error {
 	return nil
 }
 func (a Adapter) Play(ctx context.Context, path string, loop bool) error {
-	if _, err := audio.Inspect(path); err != nil {
+	if _, err := filesystem.Inspect(ctx, path); err != nil {
 		return err
 	}
 	repeat := "0"

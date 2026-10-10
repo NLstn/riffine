@@ -2,14 +2,13 @@
 package project
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
-	"os"
-	"path/filepath"
 
 	"github.com/NLstn/riffine/core/audio"
 )
@@ -70,41 +69,26 @@ func (p Project) Validate() error {
 	return nil
 }
 
-func Import(audioPath, projectPath string) (Project, error) {
-	i, err := audio.Inspect(audioPath)
-	if err != nil {
-		return Project{}, err
-	}
-	abs, err := filepath.Abs(audioPath)
-	if err != nil {
-		return Project{}, err
-	}
-	dir, err := filepath.Abs(filepath.Dir(projectPath))
-	if err != nil {
-		return Project{}, err
-	}
-	rel, err := filepath.Rel(dir, abs)
-	if err != nil {
-		rel = abs
-	}
-	p := Project{Version: Version, Name: filepath.Base(audioPath), Track: Track{Path: filepath.ToSlash(rel), Audio: i}, Settings: Settings{Speed: 1, Loop: Loop{End: i.Duration()}}}
+// New builds a version-1 document. Reference is a host-produced locator;
+// content identity is the fingerprint and metadata, never the locator.
+func New(name, reference string, info audio.Info) (Project, error) {
+	info.DataOffset, info.DataBytes = 0, 0 // Decoder cursor details are not document metadata.
+	p := Project{Version: Version, Name: name, Track: Track{Path: reference, Audio: info}, Settings: Settings{Speed: 1, Loop: Loop{End: info.Duration()}}}
 	return p, p.Validate()
 }
 
-func Load(path string) (Project, error) {
-	f, err := os.Open(path)
+const MaxDocumentBytes = 1 << 20
+
+// Decode is storage-neutral, strict and bounded. It does not close the reader.
+func Decode(r io.Reader) (Project, error) {
+	b, err := io.ReadAll(io.LimitReader(r, MaxDocumentBytes+1))
 	if err != nil {
 		return Project{}, err
 	}
-	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return Project{}, err
-	}
-	if st.Size() > 1<<20 {
+	if len(b) > MaxDocumentBytes {
 		return Project{}, errors.New("project exceeds 1 MiB")
 	}
-	dec := json.NewDecoder(f)
+	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
 	var p Project
 	if err = dec.Decode(&p); err != nil {
@@ -117,89 +101,24 @@ func Load(path string) (Project, error) {
 	return p, p.Validate()
 }
 
-// Save creates a new project without overwriting an existing file. Edits use a
-// new destination so a failed operation never destroys the previous document.
-func Save(path string, p Project) error {
+func Encode(p Project) ([]byte, error) {
 	if err := p.Validate(); err != nil {
-		return err
+		return nil, err
 	}
 	b, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if err != nil {
-		return err
+	if len(b)+1 > MaxDocumentBytes {
+		return nil, errors.New("project exceeds 1 MiB")
 	}
-	ok := false
-	defer func() {
-		f.Close()
-		if !ok {
-			os.Remove(path)
-		}
-	}()
-	if _, err = f.Write(append(b, '\n')); err != nil {
-		return err
-	}
-	if err = f.Sync(); err != nil {
-		return err
-	}
-	if err = f.Close(); err != nil {
-		return err
-	}
-	ok = true
-	return nil
+	return append(b, '\n'), nil
 }
 
-func (p Project) AudioPath(projectPath string) string {
-	if filepath.IsAbs(p.Track.Path) {
-		return filepath.FromSlash(p.Track.Path)
-	}
-	return filepath.Join(filepath.Dir(projectPath), filepath.FromSlash(p.Track.Path))
-}
-
-func (p Project) VerifyAudio(projectPath string) error {
-	i, err := audio.Inspect(p.AudioPath(projectPath))
-	if err != nil {
-		return fmt.Errorf("relink the source audio: %w", err)
-	}
+func (p Project) VerifyIdentity(i audio.Info) error {
 	old := p.Track.Audio
 	if i.SHA256 != old.SHA256 || i.Frames != old.Frames || i.SampleRate != old.SampleRate || i.Channels != old.Channels || i.Bits != old.Bits {
 		return errors.New("audio does not match project fingerprint/metadata; relink the original file")
 	}
 	return nil
-}
-
-// Rebase preserves the source reference when saving a project elsewhere.
-func (p *Project) Rebase(from, to string) error {
-	source, err := filepath.Abs(p.AudioPath(from))
-	if err != nil {
-		return err
-	}
-	dir, err := filepath.Abs(filepath.Dir(to))
-	if err != nil {
-		return err
-	}
-	rel, err := filepath.Rel(dir, source)
-	if err != nil {
-		rel = source
-	}
-	p.Track.Path = filepath.ToSlash(rel)
-	return nil
-}
-
-func (p *Project) Relink(source, projectPath string) error {
-	i, err := audio.Inspect(source)
-	if err != nil {
-		return err
-	}
-	if i.SHA256 != p.Track.Audio.SHA256 {
-		return errors.New("replacement audio fingerprint differs")
-	}
-	abs, err := filepath.Abs(source)
-	if err != nil {
-		return err
-	}
-	p.Track.Path = abs
-	return p.Rebase(projectPath, projectPath)
 }

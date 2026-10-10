@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/NLstn/riffine/core/project"
+	"github.com/NLstn/riffine/adapters/filesystem"
+	"github.com/NLstn/riffine/core/audio"
+	"github.com/NLstn/riffine/core/practice"
 )
 
 func TestPracticeWorkflow(t *testing.T) {
@@ -28,7 +30,9 @@ func TestPracticeWorkflow(t *testing.T) {
 	run("loop", "--project", slow, "--out", loop, "--start", "0.1", "--end", "0.8")
 	run("inspect", "--project", loop, "--verify")
 	run("waveform", "--project", loop, "--bins", "20", "--out", filepath.Join(d, "peaks.json"))
-	got, err := project.Load(loop)
+	service := practice.Service{Resources: filesystem.Host{}, Store: filesystem.Host{}, Decoder: audio.WAVDecoder{}}
+	session, err := service.Open(context.Background(), loop)
+	got := session.Snapshot().Project
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +41,11 @@ func TestPracticeWorkflow(t *testing.T) {
 	}
 	disabled := filepath.Join(d, "disabled.json")
 	run("loop", "--project", loop, "--out", disabled, "--enabled=false")
-	got, _ = project.Load(disabled)
+	session, err = service.Open(context.Background(), disabled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = session.Snapshot().Project
 	if got.Settings.Loop.Enabled || got.Settings.Loop.Start != .1 {
 		t.Fatal("disable changed boundaries")
 	}

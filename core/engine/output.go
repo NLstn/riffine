@@ -1,0 +1,38 @@
+package engine
+
+import (
+	"context"
+	"time"
+)
+
+// Clock returns monotonic host elapsed time. It is never a source-frame clock.
+type Clock interface{ Now() time.Duration }
+
+// Schedule is a bounded control-worker message for future live adapters. The
+// source range is [StartFrame, EndFrame). OutputStart/End are device-rate frames
+// consumed by the output device, excluding algorithm latency and queued output.
+// No callback may call core or choose practice policy. All fields are explicit
+// so an adapter can compile work into preallocated realtime schedules.
+type Schedule struct {
+	Generation             uint64
+	Sequence               uint64
+	Source                 string
+	StartFrame, EndFrame   int64
+	OutputStart, OutputEnd int64
+	Speed, Pitch           float64
+}
+type OutputAcknowledgement struct {
+	Generation          uint64
+	Sequence            uint64
+	ConsumedOutputFrame int64
+}
+
+// OutputDevice is a provisional control port for #14/#15, not an implemented
+// capability. DrainAcknowledgements must be bounded, nonblocking and ordered.
+// Overflow is an explicit error; traversal acknowledgements must not be dropped.
+// Reset invalidates all prior schedules/acknowledgements by generation.
+type OutputDevice interface {
+	Schedule(context.Context, Schedule) error
+	Reset(context.Context, uint64) error
+	DrainAcknowledgements(context.Context, int) ([]OutputAcknowledgement, error)
+}

@@ -2,6 +2,7 @@
 package audio
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -9,7 +10,8 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"os"
+
+	"github.com/NLstn/riffine/core/resource"
 )
 
 // Info describes an interleaved integer PCM WAV. Frames are per channel.
@@ -27,16 +29,12 @@ func (i Info) Duration() float64 { return float64(i.Frames) / float64(i.SampleRa
 
 // Inspect accepts RIFF/WAVE PCM 16/24/32-bit, mono/stereo at 8–192 kHz.
 // It streams the fingerprint and checks chunk boundaries without loading audio.
-func Inspect(path string) (Info, error) {
-	f, err := os.Open(path)
-	if err != nil {
+func Inspect(ctx context.Context, source resource.Reader) (Info, error) {
+	f := io.NewSectionReader(contextReader{ctx, source}, 0, source.Size())
+	if err := ctx.Err(); err != nil {
 		return Info{}, err
 	}
-	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return Info{}, err
-	}
+	var err error
 	var header [12]byte
 	if _, err = io.ReadFull(f, header[:]); err != nil {
 		return Info{}, err
@@ -45,7 +43,7 @@ func Inspect(path string) (Info, error) {
 		return Info{}, errors.New("expected RIFF/WAVE file")
 	}
 	end := int64(binary.LittleEndian.Uint32(header[4:8])) + 8
-	if end != st.Size() || end < 12 {
+	if end != source.Size() || end < 12 {
 		return Info{}, errors.New("invalid RIFF size")
 	}
 	var info Info
@@ -111,8 +109,12 @@ func Inspect(path string) (Info, error) {
 		return Info{}, err
 	}
 	h := sha256.New()
-	if _, err = io.Copy(h, f); err != nil {
+	n, err := io.Copy(h, f)
+	if err != nil {
 		return Info{}, err
+	}
+	if n != source.Size() {
+		return Info{}, errors.New("audio changed or truncated while fingerprinting")
 	}
 	info.SHA256 = hex.EncodeToString(h.Sum(nil))
 	return info, nil
@@ -129,11 +131,11 @@ type Waveform struct {
 }
 
 // Peaks preserves per-channel min/max amplitudes with bounded memory.
-func Peaks(path string, bins int) (Waveform, error) {
+func Peaks(ctx context.Context, source resource.Reader, bins int) (Waveform, error) {
 	if bins < 1 || bins > 100000 {
 		return Waveform{}, errors.New("bins must be 1–100000")
 	}
-	info, err := Inspect(path)
+	info, err := Inspect(ctx, source)
 	if err != nil {
 		return Waveform{}, err
 	}
@@ -147,14 +149,7 @@ func Peaks(path string, bins int) (Waveform, error) {
 			w.Channels[c][b] = Peak{Min: 1, Max: -1}
 		}
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return Waveform{}, err
-	}
-	defer f.Close()
-	if _, err = f.Seek(info.DataOffset, io.SeekStart); err != nil {
-		return Waveform{}, err
-	}
+	f := io.NewSectionReader(contextReader{ctx, source}, info.DataOffset, info.DataBytes)
 	bytesPerSample := info.Bits / 8
 	align := bytesPerSample * info.Channels
 	buf := make([]byte, 4096*align)
@@ -189,21 +184,10 @@ func Peaks(path string, bins int) (Waveform, error) {
 }
 
 // WriteTone writes a deterministic PCM16 sine fixture without copyrighted audio.
-func WriteTone(path string, seconds, hz float64, sampleRate, channels int) error {
+func WriteTone(f io.Writer, seconds, hz float64, sampleRate, channels int) error {
 	if math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds <= 0 || seconds > 60 || math.IsNaN(hz) || math.IsInf(hz, 0) || hz <= 0 || hz >= float64(sampleRate)/2 || sampleRate < 8000 || sampleRate > 192000 || (channels != 1 && channels != 2) {
 		return errors.New("invalid tone parameters")
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if err != nil {
-		return err
-	}
-	ok := false
-	defer func() {
-		f.Close()
-		if !ok {
-			os.Remove(path)
-		}
-	}()
 	frames := int(seconds * float64(sampleRate))
 	size := frames * channels * 2
 	if frames == 0 {
@@ -222,8 +206,10 @@ func WriteTone(path string, seconds, hz float64, sampleRate, channels int) error
 	binary.LittleEndian.PutUint16(h[34:], 16)
 	copy(h[36:], "data")
 	binary.LittleEndian.PutUint32(h[40:], uint32(size))
-	if _, err = f.Write(h); err != nil {
+	if n, err := f.Write(h); err != nil {
 		return err
+	} else if n != len(h) {
+		return io.ErrShortWrite
 	}
 	b := make([]byte, size)
 	for i := 0; i < frames; i++ {
@@ -232,12 +218,24 @@ func WriteTone(path string, seconds, hz float64, sampleRate, channels int) error
 			binary.LittleEndian.PutUint16(b[(i*channels+c)*2:], uint16(v))
 		}
 	}
-	if _, err = f.Write(b); err != nil {
+	if n, err := f.Write(b); err != nil {
 		return err
+	} else if n != len(b) {
+		return io.ErrShortWrite
 	}
-	if err = f.Close(); err != nil {
-		return err
-	}
-	ok = true
 	return nil
+}
+
+// Reads are bounded and observe cancellation between host reads. A host must
+// make an individual blocking read interruptible when its platform requires it.
+type contextReader struct {
+	ctx    context.Context
+	source io.ReaderAt
+}
+
+func (r contextReader) ReadAt(p []byte, off int64) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.source.ReadAt(p, off)
 }
