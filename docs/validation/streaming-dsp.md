@@ -29,7 +29,8 @@ No source song or output media is committed. DSP dependency revisions are unchan
 - Invalid version/format/block size, speed/pitch, input NaN, overlapping samples,
   insufficient output/flush capacity: explicit errors and no committed frame
   counts/history. Unexpected processing failures poison the instance until reset.
-- Configure retains history and fractional carry; reset removes old audio/carry;
+- Live speed/pitch changes on one running instance reach the generated signal
+  and preserve segment output counts. Configure retains history and fractional carry; reset removes old audio/carry;
   short input flushes; empty/repeated flush is empty; post-EOF process/configure
   fail until reset. Raw latency and terminal tail are exposed, not hidden/trimmed.
 - Queue saturation rejects writes, wrap preserves channels/order, underruns zero

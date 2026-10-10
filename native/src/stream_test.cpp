@@ -132,6 +132,31 @@ void changes() {
   uint32_t tail=0;ok(riffine_stream_flush(s.get(),out.data(),20000,&tail,error,sizeof(error)));
   check(tail>0,"short stream has no tail");
 }
+void liveChanges() {
+  auto s=create(1,1,0,257);
+  std::vector<float> input(257),output(20000);
+  uint64_t source=0;
+  for(unsigned segment=0;segment<3;++segment) {
+    double speed=segment==0 ? 1 : (segment==1 ? .5 : 2);
+    double pitch=segment==0 ? 0 : (segment==1 ? 12 : -12);
+    ok(riffine_stream_configure(s.get(),speed,pitch,error,sizeof(error)));
+    uint64_t sent=0,received=0,crossings=0,measured=0;float previous=0;
+    while(sent<144000) {
+      auto frames=uint32_t(std::min<uint64_t>(257,144000-sent));
+      for(unsigned i=0;i<frames;++i) input[i]=float(.2*std::sin(2*3.141592653589793*440*double(source+i)/48000));
+      uint32_t consumed=0,produced=0;
+      ok(riffine_stream_process(s.get(),input.data(),frames,output.data(),20000,&consumed,&produced,error,sizeof(error)));
+      for(unsigned i=0;i<produced;++i) {
+        if(received+i>=55000) { if(previous<=0 && output[i]>0) ++crossings; ++measured; }
+        previous=output[i];
+      }
+      source+=consumed;sent+=consumed;received+=produced;
+    }
+    check(received==uint64_t(144000/speed),"live change frame count");
+    double hz=double(crossings)*48000/measured,expected=440*std::pow(2,pitch/12);
+    check(std::abs(hz-expected)<expected*.035,"live pitch change did not reach output");
+  }
+}
 void resetHistory() {
   auto s=create(2,1,0,257);
   auto fresh=create(2,1,0,257);
@@ -187,7 +212,7 @@ void queue() {
 int main(int argc,char **argv) {
   try {
     if(argc==3 && std::string(argv[1])=="--soak") {tone(2,.75,3,unsigned(std::stoul(argv[2])),4096,true);return 0;}
-    invalid();changes();resetHistory();queue();
+    invalid();changes();liveChanges();resetHistory();queue();
     for(unsigned channels: {1u,2u}) for(double speed: {.25,.5,.75,1.,1.3,2.})
       tone(channels,speed,speed==.25 ? -12 : (speed==2 ? 12 : 0),5);
     std::puts("streaming DSP and bounded PCM queue checks passed");return 0;
