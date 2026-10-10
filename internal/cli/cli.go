@@ -28,11 +28,13 @@ const Help = `Riffine — local guitar practice core (working name)
   riffine waveform --project song.riffine.json [--bins 1000 --out song.peaks.json]
   riffine render   --project song.riffine.json --out practice.wav
   riffine play     --project song.riffine.json
+  riffine preview  --project song.riffine.json [--silent]
   riffine doctor
 
 Flags precede no positional arguments. Existing output files are never replaced.
 Render processes the enabled loop once; play repeats it until Ctrl+C.
 Play renders a temporary WAV first. Speed/pitch changes are offline in this slice.
+Preview streams the selected range once, with fixed speed/pitch; --silent uses a null device.
 Only PCM 16/24/32-bit mono/stereo WAV import is currently supported.
 `
 
@@ -45,7 +47,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 	f := flag.NewFlagSet(command, flag.ContinueOnError)
 	f.SetOutput(errOut)
 	var source, dest, proj string
-	var verify bool
+	var verify, silent bool
 	var speed, pitch, start, end, seconds, hz float64
 	var enabled bool
 	var bins int
@@ -77,8 +79,11 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 	case "render":
 		f.StringVar(&proj, "project", "", "project path")
 		f.StringVar(&dest, "out", "", "new rendered WAV")
-	case "play":
+	case "play", "preview":
 		f.StringVar(&proj, "project", "", "project path")
+		if command == "preview" {
+			f.BoolVar(&silent, "silent", false, "use an explicit null output device for diagnostics")
+		}
 	case "tone":
 		f.StringVar(&dest, "out", "", "new tone WAV")
 		f.Float64Var(&seconds, "seconds", 3, "duration up to 60 seconds")
@@ -133,13 +138,14 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 		return session.SaveAs(ctx, dest)
 	}
 	var adapter native.Adapter
-	if command == "render" || command == "play" {
+	if command == "render" || command == "play" || command == "preview" {
 		helper, err := native.Find()
 		if err != nil {
 			return err
 		}
-		adapter = native.Adapter{Executable: helper, Stderr: errOut}
+		adapter = native.Adapter{Executable: helper, Stderr: errOut, SilentPreview: silent}
 		service.Renderer = adapter
+		service.Previewer = adapter
 	}
 	session, err := service.Open(ctx, proj)
 	if err != nil {
@@ -201,6 +207,13 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 			return e
 		}
 		return closeErr
+	case "preview":
+		fmt.Fprintln(errOut, "Verifying source, then streaming one selection. Press Ctrl+C to stop.")
+		report, e := session.Preview(ctx)
+		if e != nil {
+			return e
+		}
+		return writeJSON(report)
 	case "render", "play":
 		if command == "render" {
 			return session.Render(ctx, dest)

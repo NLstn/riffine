@@ -10,12 +10,15 @@ songs, saves versioned practice projects, sets independent speed/pitch and A/B
 loops, extracts waveform peaks, renders practice audio through Signalsmith
 Stretch, and plays it through miniaudio.
 
-The browser client is an early UI slice: practice controls and playback are not
-connected yet. The current CLI playback renders the selection to a temporary
+The browser client indexes local music and supports basic play/pause, seeking
+and track navigation. Practice speed/pitch and loop controls are not connected yet. The current CLI playback renders the selection to a temporary
 WAV first; parameters are not changed interactively during playback. The native
 processing layer now also has an experimental [bounded streaming DSP API](native/include/riffine_stream.h)
-and PCM queue; [its validation record](docs/validation/streaming-dsp.md) tracks
-worker checks and the remaining device/transport work.
+and PCM queue. The CLI `preview` command connects these to a native worker and
+output device for one selected range, with fixed speed/pitch and no temporary WAV.
+See [streaming DSP checks](docs/validation/streaming-dsp.md) and
+[preview validation](docs/validation/streaming-preview.md) for remaining transport
+and hardware acceptance.
 
 ## Build
 
@@ -70,6 +73,22 @@ Use `./bin/riffine.exe` instead of `./bin/riffine` on Windows.
 ./bin/riffine render --project loop.riffine.json --out practice.wav
 ./bin/riffine play --project loop.riffine.json
 ```
+
+To stream the selection once without rendering it first:
+
+```sh
+./bin/riffine preview --project loop.riffine.json
+# Run the same worker/device path without sound and print diagnostic JSON:
+./bin/riffine preview --project loop.riffine.json --silent
+```
+
+`preview` verifies the complete source identity before opening its streaming
+worker. It uses fixed saved parameters and previews an enabled loop once.
+`--silent` explicitly selects a null output device; normal preview requires
+CoreAudio on macOS or WASAPI on Windows and reports device failures.
+Pause/seek/live edits, continuous loop scheduling and presentation-clock
+acknowledgements remain subsequent work. Preview diagnostics count PCM copied
+into callbacks, not hardware presentation or completed practice loops.
 
 Press Ctrl+C to stop playback. An enabled loop is rendered once for `render` and
 repeated for `play`. Disable it using `loop --enabled=false` with a new `--out`.

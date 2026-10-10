@@ -8,14 +8,15 @@ hosts; product validation and practice semantics stay in Go.
 ## Operations and ownership
 
 Construct `practice.Service` with `resource.Resources`, `resource.Store`, and
-`audio.Decoder`. Supply `engine.Renderer` only when offline rendering is available.
+`audio.Decoder`. Supply `engine.Renderer` for offline rendering and `engine.Previewer` for
+single-pass streaming preview when their host adapters are available.
 Call `Import(ctx, sourceHandle, documentHandle)` or `Open(ctx, documentHandle)` to
 create a session. Import does not save. Open parses/validates the project but does
 not open audio: a session may be edited or relinked while its audio is missing.
 `ready` means a valid editable document, not verified audio or a running device.
 
 `Session.Dispatch` applies commands. `Snapshot` returns owned value state, including
-a copied capabilities slice. `Verify`, `Waveform` and `Render` inspect the original
+a copied capabilities slice. `Verify`, `Waveform`, `Render` and `Preview` inspect the original
 source identity before processing. `Relink` accepts only matching bytes AND
 metadata. `SaveAs` rebases the reference for a destination, serializes a validated
 project, and requests exclusive creation; it leaves the current document, state,
@@ -76,9 +77,10 @@ a request racing an already committed operation does not undo it. A host must
 observe contexts and bound/interrupt its own blocking operations. WAV parsing,
 hashing and peaks check cancellation between reader calls.
 
-Capabilities include tested decoder formats, `offlineRender`, and `liveTransport`.
+Capabilities include tested decoder formats, `offlineRender`, optional
+`streamPreview` (omitted when unavailable), and `liveTransport`.
 The supplied WAV decoder reports `wav-pcm`; live transport is always false in this
-slice. Missing renderers cause an explicit capability error. Browser extension
+slice. Missing render/preview adapters cause explicit capability errors. Browser extension
 lists must not override these host capability reports. Do not expose play/pause,
 seek or routines through this API until their core behavior is implemented.
 
@@ -145,3 +147,31 @@ resource ownership, cancellation, exclusive writes and bounded event tests.
 Validation commands and the native CLI workflow are recorded in
 [the foundation validation record](validation/core-contract.md). Live/hardware,
 browser and mobile validation remain separate roadmap gates.
+
+## Single-pass streaming preview
+
+`Session.Preview(ctx)` snapshots the current verified selection under the control
+lock and sends fixed source-frame bounds/parameters to `engine.Previewer`. An
+enabled loop selects one range; preview does not repeat it. Project state,
+command sequences and events remain unchanged, including on error/cancellation.
+The native desktop adapter starts one isolated helper, and bounds diagnostic
+stdout to 8 KiB. It validates report schema, counts, mode and format; core also
+checks the source/output dimensions against the project. Context cancellation
+terminates the helper. No samples or realtime callbacks pass through Go.
+
+The native worker decodes bounded blocks through the shared streaming DSP and
+feeds a preallocated native queue. The device callback only copies PCM, fills
+silence and updates lock-free submission/underrun counters. Normal preview uses
+a real requested backend; explicit null-device mode is available for diagnostics.
+The complete identity hash is verified before streaming, so startup still
+includes a source-size-dependent read. The helper reopens the verified local
+path, as the existing offline adapter does; concurrent source replacement or
+modification is not supported. Hosts must supply stable resources.
+
+`engine.PreviewReport` is diagnostic output, not an acknowledgement. Copied frames
+are callback PCM at source rate before native device conversion and buffering;
+they cannot drive `engine.Traversal` or routine counters. Native startup time
+ends when device start returns and excludes core hashing, process startup and
+hardware presentation. A conservative backend buffer drain is not a hardware
+clock. Live transport remains false. See
+[the preview validation record](validation/streaming-preview.md).

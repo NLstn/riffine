@@ -22,7 +22,7 @@ with bounded control IPC for resource handles, commands and acknowledgements.
 This preserves pure-Go builds, MSVC support and process cancellation/crash
 isolation. Decode, DSP and PCM queues will stay inside that helper: samples must
 never cross the Go/UI command bridge. The reusable C ABI can also be linked into
-an in-process native host. This slice implements neither the persistent control
+an in-process native host. The processing foundation implements neither the persistent control
 IPC nor a Go streaming adapter; their latency/error semantics need validation
 when the actual device worker is connected. Mobile/browser gates remain #13.
 
@@ -49,3 +49,15 @@ worker validation, not a 30-minute realtime device session. CoreAudio/WASAPI,
 startup/seek/parameter latency, underruns, device loss, cancellation and listening
 measurements remain unchecked #14 acceptance criteria. See the
 [validation record](../validation/streaming-dsp.md).
+
+## Single-range preview follow-up
+
+The next slice connects a read-only WAV/DSP cursor to a native worker, preallocated
+queue and miniaudio output callback. A Go `Previewer` adapter starts one helper for
+one verified selection and receives bounded diagnostic JSON. This is an initial
+control binding with fixed parameters, not persistent transport IPC. PCM stays
+inside the helper. Explicit null output exercises the same callback path in CI;
+normal preview requests CoreAudio/WASAPI and has no silent fallback. Submission
+counters deliberately cannot acknowledge a practice traversal; native conversion,
+buffering and hardware presentation remain a distinct timeline. Continuous
+scheduling, live commands and their latency/error semantics remain #14/#15.

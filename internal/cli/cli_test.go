@@ -3,6 +3,9 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"github.com/NLstn/riffine/core/engine"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -61,5 +64,32 @@ func TestBadArguments(t *testing.T) {
 		if err := Run(context.Background(), args, &out, &out); err == nil {
 			t.Fatalf("accepted %v", args)
 		}
+	}
+}
+
+func TestSilentStreamingPreviewCLI(t *testing.T) {
+	if os.Getenv("RIFFINE_AUDIO_HELPER") == "" {
+		t.Skip("native helper required for null-device CLI integration")
+	}
+	d := t.TempDir()
+	source := filepath.Join(d, "tone.wav")
+	document := filepath.Join(d, "song.json")
+	var output bytes.Buffer
+	for _, args := range [][]string{{"tone", "--out", source, "--seconds", ".1"}, {"import", "--audio", source, "--out", document}, {"preview", "--project", document, "--silent"}} {
+		output.Reset()
+		if err := Run(context.Background(), args, &output, os.Stderr); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var report engine.PreviewReport
+	if err := json.Unmarshal(output.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Mode != "null" || report.CopiedFrames != 4800 {
+		t.Fatalf("CLI preview failed: %+v", report)
+	}
+	entries, err := os.ReadDir(d)
+	if err != nil || len(entries) != 2 {
+		t.Fatal("CLI preview created a rendered WAV")
 	}
 }

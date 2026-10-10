@@ -23,3 +23,32 @@ type Renderer interface {
 type Player interface {
 	Play(context.Context, string, bool) error
 }
+
+// PreviewRequest describes one original-source range, with fixed parameters.
+// It is independent of transport, loop repetition and output acknowledgements.
+type PreviewRequest struct {
+	Source               string
+	StartFrame, EndFrame int64
+	Speed, Pitch         float64
+}
+
+// PreviewReport is diagnostic evidence, not a playback-completion event.
+// CopiedFrames and SampleRate refer to the callback's source-rate PCM, before
+// native device conversion/buffering; they are not hardware presentation frames.
+// StartupMilliseconds excludes core source identity verification.
+type PreviewReport struct {
+	Version             int     `json:"version"`
+	Channels            int     `json:"channels"`
+	SampleRate          int     `json:"sampleRate"`
+	OutputFrames        int64   `json:"outputFrames"`
+	CopiedFrames        int64   `json:"copiedFrames"`
+	UnderrunFrames      int64   `json:"underrunFrames"`
+	DecodedBeforeStart  int64   `json:"decodedBeforeStart"`
+	StartupMilliseconds float64 `json:"startupMilliseconds"`
+	Backend             string  `json:"backend"`
+	Mode                string  `json:"mode"`
+}
+
+type Previewer interface {
+	Preview(context.Context, PreviewRequest) (PreviewReport, error)
+}
