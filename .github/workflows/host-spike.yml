@@ -1,0 +1,38 @@
+name: Host feasibility spike
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.24.x'
+          cache: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+      - run: test -z "$(gofmt -l spikes)"
+      - run: sh scripts/build-host-spike.sh portable
+      - run: RIFFINE_SPIKE_OUT=build/host-spike/native sh scripts/build-host-spike.sh native
+      - run: node spikes/browser/check.mjs
+      - name: Compare native C ABI and Go reports
+        run: |
+          build/host-spike/host-spike < core/practice/testdata/session-v1.json > build/host-spike/go-report.json
+          build/host-spike/native/mobile-runner core/practice/testdata/session-v1.json > build/host-spike/c-report.json
+          diff -u build/host-spike/go-report.json build/host-spike/c-report.json
+  ios-link:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.24.x'
+          cache: false
+      - run: RIFFINE_SPIKE_OUT=build/host-spike/ios sh scripts/build-host-spike.sh ios
