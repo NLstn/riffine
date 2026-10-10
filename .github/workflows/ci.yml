@@ -1,0 +1,64 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  core:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: false
+      - run: go test ./...
+      - run: go vet ./...
+      - run: go build ./cmd/riffine
+      - if: runner.os != 'Windows'
+        run: go test -race ./...
+      - if: runner.os == 'Linux'
+        run: test -z "$(gofmt -l adapters cmd core internal)"
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: false
+      - run: cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build/native --config Release
+      - run: cmake --install build/native --config Release --prefix build/package
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:RIFFINE_AUDIO_HELPER = (Resolve-Path build/package/bin/riffine-audio.exe).Path
+          go test -count=1 -v ./adapters/native
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go build -trimpath -o build/package/bin/riffine.exe ./cmd/riffine
+      - if: runner.os != 'Windows'
+        run: |
+          export RIFFINE_AUDIO_HELPER="$PWD/build/package/bin/riffine-audio"
+          go test -count=1 -v ./adapters/native
+          go build -trimpath -o build/package/bin/riffine ./cmd/riffine
+      - shell: bash
+        run: |
+          cp LICENSE THIRD_PARTY_NOTICES.md build/package/
+          cp "$(go env GOROOT)/LICENSE" build/package/licenses/go-LICENSE
+          cp "$(go env GOROOT)/PATENTS" build/package/licenses/go-PATENTS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: riffine-cli-${{ runner.os }}-${{ runner.arch }}
+          path: build/package/

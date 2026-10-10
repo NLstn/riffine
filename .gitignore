@@ -1,0 +1,7 @@
+/build/
+/bin/
+/licenses/
+*.riffine.json
+*.wav
+*.peaks.json
+!testdata/**
