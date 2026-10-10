@@ -6,6 +6,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   core:
     strategy:
@@ -26,6 +29,19 @@ jobs:
         run: go test -race ./...
       - if: runner.os == 'Linux'
         run: test -z "$(gofmt -l adapters cmd core internal)"
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run build
+        working-directory: web
   native:
     strategy:
       fail-fast: false
@@ -62,3 +78,17 @@ jobs:
         with:
           name: riffine-cli-${{ runner.os }}-${{ runner.arch }}
           path: build/package/
+  required:
+    if: always()
+    needs: [core, native, web]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if a CI job did not succeed
+        env:
+          CORE_RESULT: ${{ needs.core.result }}
+          NATIVE_RESULT: ${{ needs.native.result }}
+          WEB_RESULT: ${{ needs.web.result }}
+        run: |
+          test "$CORE_RESULT" = success
+          test "$NATIVE_RESULT" = success
+          test "$WEB_RESULT" = success
