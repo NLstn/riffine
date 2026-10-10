@@ -1,12 +1,14 @@
 # Implementation plan
 
-Date: 2026-10-10. Working name: Riffine. Scope approved: core plus CLI only.
+Date: 2026-10-10. Working name: Riffine. Scope: Go core and CLI, plus a local
+React/TypeScript/Vite music-library client.
 
 ## M0 — Foundation
 
 One Go module; native CMake subproject; MIT license with third-party notices;
 core tests on Linux/Windows/macOS; native integration on Windows/macOS; contributor
-guide and ADR. No npm, UI, account backend, hosting or sync setup.
+guide and ADR. The first web client is local-only; no account backend, hosting or
+sync setup.
 
 Acceptance: `go test ./...`, `go vet ./...`, core build, native build and automated
 DSP tests pass. CI publishes development artifacts with licenses, not signed releases.
@@ -49,9 +51,11 @@ mode only when another host needs it; avoid premature network services. Document
 capabilities, cancellation, errors and persistence ownership. Expand waveform
 pyramids for long songs and add saved named regions if justified by practice use.
 
-## M4 — Clients (separately authorized future work)
+## M4 — Local clients
 
-Shared React UI with browser adapter, then Wails Windows/macOS host. Browser DSP
+Shared React UI with a browser adapter and an optional Wails Windows/macOS host.
+The initial browser slice selects a local music folder and reads its tags in the
+browser. Next, connect practice operations through a host boundary. Browser DSP
 uses client-side AudioWorklet/WASM; project persistence uses browser local storage
 facilities, with explicit file relinking. Offline operation is the default.
 WinUI and Linux desktop follow only when needed. Account/settings/audio sync is

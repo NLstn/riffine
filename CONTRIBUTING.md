@@ -1,7 +1,8 @@
 # Contributing
 
 Use a feature branch and a pull request. Describe user-visible behavior and
-validation. Keep clients out of this initial core/CLI phase.
+validation. Keep the core host-neutral. The local web client lives in `web/`;
+avoid moving browser, React, or host-specific code into Go core packages.
 
 Run `go test ./...`, `go vet ./...` and `gofmt` before submitting changes. Changes
 to native audio require `scripts/test.ps1 -Native` or `sh scripts/test.sh --native`
