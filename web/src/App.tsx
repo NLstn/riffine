@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { chooseFolder, formatDuration, formatSize, indexFiles } from './library';
 import type { MusicTrack } from './library';
@@ -7,7 +7,14 @@ type Phase = 'idle' | 'indexing' | 'ready';
 
 function App() {
   const folderInput = useRef<HTMLInputElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const playbackUrl = useRef<string | undefined>(undefined);
   const [tracks, setTracks] = useState<MusicTrack[]>([]);
+  const [currentTrack, setCurrentTrack] = useState<MusicTrack | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [playbackDuration, setPlaybackDuration] = useState(0);
+  const [playbackError, setPlaybackError] = useState('');
   const [folderName, setFolderName] = useState('');
   const [query, setQuery] = useState('');
   const [phase, setPhase] = useState<Phase>('idle');
@@ -23,9 +30,83 @@ function App() {
     );
   }, [query, tracks]);
 
+  useEffect(() => () => {
+    if (playbackUrl.current) URL.revokeObjectURL(playbackUrl.current);
+  }, []);
+
+  const stopPlayback = () => {
+    audioRef.current?.pause();
+    audioRef.current?.removeAttribute('src');
+    audioRef.current?.load();
+    if (playbackUrl.current) URL.revokeObjectURL(playbackUrl.current);
+    playbackUrl.current = undefined;
+    setCurrentTrack(null);
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setPlaybackDuration(0);
+    setPlaybackError('');
+  };
+
+  const playTrack = (track: MusicTrack) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (currentTrack?.id === track.id && audio.src) {
+      if (audio.paused) {
+        void audio.play().catch(() => {
+          setIsPlaying(false);
+          setPlaybackError('This file could not be played by your browser.');
+        });
+      } else {
+        audio.pause();
+      }
+      return;
+    }
+
+    if (playbackUrl.current) URL.revokeObjectURL(playbackUrl.current);
+    playbackUrl.current = URL.createObjectURL(track.file);
+    audio.src = playbackUrl.current;
+    audio.load();
+    setCurrentTrack(track);
+    setCurrentTime(0);
+    setPlaybackDuration(track.duration ?? 0);
+    setPlaybackError('');
+    setIsPlaying(true);
+    void audio.play().catch(() => {
+      setIsPlaying(false);
+      setPlaybackError('This file could not be played by your browser.');
+    });
+  };
+
+  const togglePlayback = () => {
+    const audio = audioRef.current;
+    if (!audio || !currentTrack) return;
+    if (audio.paused) {
+      void audio.play().catch(() => {
+        setIsPlaying(false);
+        setPlaybackError('This file could not be played by your browser.');
+      });
+    } else {
+      audio.pause();
+    }
+  };
+
+  const skipTrack = (direction: -1 | 1) => {
+    if (!currentTrack || tracks.length < 2) return;
+    const index = tracks.findIndex((track) => track.id === currentTrack.id);
+    const nextIndex = (index + direction + tracks.length) % tracks.length;
+    playTrack(tracks[nextIndex]);
+  };
+
+  const seek = (time: number) => {
+    if (!audioRef.current || !Number.isFinite(time)) return;
+    audioRef.current.currentTime = time;
+    setCurrentTime(time);
+  };
+
   const addFolder = async (name: string, files: File[]) => {
     const audioFiles = files.filter((file) => /\.(aac|aif|aiff|ape|flac|m4a|m4b|m4p|mp3|mpc|oga|ogg|opus|wav|wave|wma|wv)$/i.test(file.name));
     setFolderName(name);
+    stopPlayback();
     setNotice('');
     setPhase('indexing');
     setProgress({ complete: 0, total: audioFiles.length });
@@ -179,6 +260,7 @@ function App() {
               )}
 
               {notice && <div className="notice" role="status">{notice}</div>}
+              {playbackError && <div className="notice playback-notice" role="status">{playbackError}</div>}
 
               <div className="table-wrap">
                 <table>
@@ -186,13 +268,25 @@ function App() {
                   <tbody>
                     {visibleTracks.map((track, index) => (
                       <tr key={track.id}>
-                        <td className="track-number">{String(track.trackNumber ?? index + 1).padStart(2, '0')}</td>
+                        <td className="track-number">
+                          <button
+                            className={`track-play-button${currentTrack?.id === track.id && isPlaying ? ' is-playing' : ''}`}
+                            type="button"
+                            onClick={() => playTrack(track)}
+                            aria-label={`${currentTrack?.id === track.id && isPlaying ? 'Pause' : 'Play'} ${track.title}`}
+                            title={currentTrack?.id === track.id && isPlaying ? 'Pause track' : 'Play track'}
+                          >{currentTrack?.id === track.id && isPlaying ? 'Ⅱ' : '▶'}</button>
+                          <span>{String(track.trackNumber ?? index + 1).padStart(2, '0')}</span>
+                        </td>
                         <td>
                           <div className="track-cell">
                             {track.artworkUrl
                               ? <img className="cover-art" src={track.artworkUrl} alt="" />
                               : <div className="cover-placeholder"><span>♫</span></div>}
-                            <div className="track-text"><strong title={track.title}>{track.title}</strong><span title={track.artist}>{track.artist}</span></div>
+                            <div className="track-text">
+                              <button className="track-title-button" type="button" onClick={() => playTrack(track)} title={`Play ${track.title}`}>{track.title}</button>
+                              <span title={track.artist}>{track.artist}</span>
+                            </div>
                           </div>
                         </td>
                         <td><div className="album-cell"><strong title={track.album}>{track.album}</strong><span>{[track.genre, track.year].filter(Boolean).join(' · ') || '—'}</span></div></td>
@@ -214,6 +308,58 @@ function App() {
 
         <footer className="page-footer"><span>Made for the moments between play and replay.</span><span>RIFFINE <span className="footer-accent">●</span> PRE-ALPHA</span></footer>
       </main>
+      <audio
+        ref={audioRef}
+        className="visually-hidden"
+        preload="metadata"
+        onPlay={() => { setIsPlaying(true); setPlaybackError(''); }}
+        onPause={() => setIsPlaying(false)}
+        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+        onLoadedMetadata={(event) => setPlaybackDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
+        onEnded={() => {
+          const index = currentTrack ? tracks.findIndex((track) => track.id === currentTrack.id) : -1;
+          if (index >= 0 && tracks.length > 1) playTrack(tracks[(index + 1) % tracks.length]);
+          else setIsPlaying(false);
+        }}
+        onError={() => {
+          if (currentTrack) {
+            setIsPlaying(false);
+            setPlaybackError('This browser cannot play this file format. Try MP3, M4A, OGG, or WAV.');
+          }
+        }}
+      />
+      {currentTrack && (
+        <footer className="player-bar" aria-label="Audio player">
+          <div className="player-track">
+            {currentTrack.artworkUrl
+              ? <img className="player-cover" src={currentTrack.artworkUrl} alt="" />
+              : <div className="player-cover player-cover-placeholder">♫</div>}
+            <div className="player-track-text"><strong title={currentTrack.title}>{currentTrack.title}</strong><span title={currentTrack.artist}>{currentTrack.artist}</span></div>
+          </div>
+          <div className="player-controls">
+            <div className="transport-controls">
+              <button type="button" onClick={() => skipTrack(-1)} disabled={tracks.length < 2} aria-label="Previous track" title="Previous track">|◀</button>
+              <button className="main-play-button" type="button" onClick={togglePlayback} aria-label={isPlaying ? 'Pause' : 'Play'} title={isPlaying ? 'Pause' : 'Play'}>{isPlaying ? 'Ⅱ' : '▶'}</button>
+              <button type="button" onClick={() => skipTrack(1)} disabled={tracks.length < 2} aria-label="Next track" title="Next track">▶|</button>
+            </div>
+            <div className="seek-row">
+              <span>{formatDuration(currentTime)}</span>
+              <input
+                type="range"
+                min="0"
+                max={playbackDuration || 0}
+                step="0.1"
+                value={Math.min(currentTime, playbackDuration || 0)}
+                onChange={(event) => seek(Number(event.target.value))}
+                disabled={!playbackDuration}
+                aria-label="Seek through track"
+              />
+              <span>{formatDuration(playbackDuration)}</span>
+            </div>
+          </div>
+          <button className="close-player-button" type="button" onClick={stopPlayback} aria-label="Close player" title="Close player">×</button>
+        </footer>
+      )}
     </div>
   );
 }
