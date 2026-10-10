@@ -62,13 +62,13 @@ jobs:
         shell: pwsh
         run: |
           $env:RIFFINE_AUDIO_HELPER = (Resolve-Path build/package/bin/riffine-audio.exe).Path
-          go test -count=1 -v ./adapters/native
+          go test -count=1 -v ./adapters/native ./internal/cli
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go build -trimpath -o build/package/bin/riffine.exe ./cmd/riffine
       - if: runner.os != 'Windows'
         run: |
           export RIFFINE_AUDIO_HELPER="$PWD/build/package/bin/riffine-audio"
-          go test -count=1 -v ./adapters/native
+          go test -count=1 -v ./adapters/native ./internal/cli
           go build -trimpath -o build/package/bin/riffine ./cmd/riffine
       - shell: bash
         run: |

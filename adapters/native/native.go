@@ -17,8 +17,9 @@ import (
 )
 
 type Adapter struct {
-	Executable string
-	Stderr     io.Writer
+	Executable    string
+	Stderr        io.Writer
+	SilentPreview bool
 }
 
 // Check verifies that the configured helper can actually execute.

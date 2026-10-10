@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"math"
 	"reflect"
 	"sync"
 	"testing"
@@ -314,5 +315,80 @@ func TestStrictCommandDecode(t *testing.T) {
 	errorCode(t, err, InvalidCommand)
 	if !reflect.DeepEqual(before, s.Snapshot()) {
 		t.Fatal("invalid payload mutated state")
+	}
+}
+
+type previewRecorder struct {
+	request     engine.PreviewRequest
+	called      bool
+	cause       error
+	wrongFormat bool
+}
+
+func (r *previewRecorder) Preview(_ context.Context, q engine.PreviewRequest) (engine.PreviewReport, error) {
+	r.request = q
+	r.called = true
+	frames := int64(math.Round(float64(q.EndFrame-q.StartFrame) / q.Speed))
+	report := engine.PreviewReport{Version: 1, Channels: 1, SampleRate: 48000, OutputFrames: frames, CopiedFrames: frames}
+	if r.wrongFormat {
+		report.SampleRate = 44100
+	}
+	return report, r.cause
+}
+func TestPreviewUsesSharedSelectionWithoutEvents(t *testing.T) {
+	s, _, _ := newSession(t)
+	r := &previewRecorder{}
+	s.service.Previewer = r
+	var fixture struct {
+		Steps  []struct{ Command Command }
+		Render struct {
+			StartFrame, EndFrame int64
+			Speed, Pitch         float64
+		}
+	}
+	if err := json.Unmarshal(sessionFixture, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range fixture.Steps {
+		_, _ = s.Dispatch(context.Background(), step.Command)
+	}
+	s.DrainEvents()
+	before := s.Snapshot()
+	if !before.Capabilities.StreamPreview || before.Capabilities.LiveTransport {
+		t.Fatal("incorrect preview/transport capability")
+	}
+	if _, err := s.Preview(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	want := engine.PreviewRequest{Source: "opaque:original", StartFrame: fixture.Render.StartFrame, EndFrame: fixture.Render.EndFrame, Speed: fixture.Render.Speed, Pitch: fixture.Render.Pitch}
+	if r.request != want || !reflect.DeepEqual(before, s.Snapshot()) || len(s.DrainEvents().Events) != 0 {
+		t.Fatalf("preview changed session or selection: %+v", r.request)
+	}
+	r.wrongFormat = true
+	_, err := s.Preview(context.Background())
+	errorCode(t, err, HostFailure)
+	r.wrongFormat = false
+	r.cause = context.Canceled
+	_, err = s.Preview(context.Background())
+	errorCode(t, err, Cancelled)
+}
+func TestPreviewVerifiesAndCancelsBeforeCallingHost(t *testing.T) {
+	s, host, _ := newSession(t)
+	_, err := s.Preview(context.Background())
+	errorCode(t, err, UnsupportedCapability)
+	r := &previewRecorder{}
+	s.service.Previewer = r
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = s.Preview(ctx)
+	errorCode(t, err, Cancelled)
+	if r.called {
+		t.Fatal("cancelled preview reached host")
+	}
+	host.data["opaque:original"][100] ^= 1
+	_, err = s.Preview(context.Background())
+	errorCode(t, err, IdentityMismatch)
+	if r.called {
+		t.Fatal("changed source reached playback")
 	}
 }

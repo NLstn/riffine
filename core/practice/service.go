@@ -52,6 +52,7 @@ type Capabilities struct {
 	Formats       []string `json:"formats"`
 	OfflineRender bool     `json:"offlineRender"`
 	LiveTransport bool     `json:"liveTransport"`
+	StreamPreview bool     `json:"streamPreview,omitempty"`
 }
 
 // Command sequences start at 1, are contiguous and apply only on success.
@@ -88,6 +89,7 @@ type Service struct {
 	Store     resource.Store
 	Decoder   audio.Decoder
 	Renderer  engine.Renderer
+	Previewer engine.Previewer
 }
 
 func (s Service) check(ctx context.Context) error {
@@ -164,7 +166,7 @@ type Session struct {
 
 func (s *Session) snapshot() Snapshot {
 	return Snapshot{Version: APIVersion, Sequence: s.sequence, State: "ready", Project: s.p,
-		Capabilities: Capabilities{Formats: append([]string{}, s.service.Decoder.Formats()...), OfflineRender: s.service.Renderer != nil}}
+		Capabilities: Capabilities{Formats: append([]string{}, s.service.Decoder.Formats()...), OfflineRender: s.service.Renderer != nil, StreamPreview: s.service.Previewer != nil}}
 }
 func (s *Session) Snapshot() Snapshot { s.mu.Lock(); defer s.mu.Unlock(); return s.snapshot() }
 func (s *Session) emit(kind string) {
@@ -332,15 +334,42 @@ func (s *Session) Render(ctx context.Context, destination string) error {
 	if err := s.verify(ctx, s.source); err != nil {
 		return err
 	}
-	start, end := int64(0), s.p.Track.Audio.Frames
-	if s.p.Settings.Loop.Enabled {
-		rate := float64(s.p.Track.Audio.SampleRate)
-		start = int64(math.Round(s.p.Settings.Loop.Start * rate))
-		end = int64(math.Round(s.p.Settings.Loop.End * rate))
-	}
+	start, end := s.selection()
 	err := s.service.Renderer.Render(ctx, engine.RenderRequest{Source: s.source, Destination: destination, StartFrame: start, EndFrame: end, Speed: s.p.Settings.Speed, Pitch: s.p.Settings.Pitch})
 	if err != nil {
 		return failure(HostFailure, err)
 	}
 	return nil
+}
+
+func (s *Session) selection() (int64, int64) {
+	if s.p.Settings.Loop.Enabled {
+		rate := float64(s.p.Track.Audio.SampleRate)
+		return int64(math.Round(s.p.Settings.Loop.Start * rate)), int64(math.Round(s.p.Settings.Loop.End * rate))
+	}
+	return 0, s.p.Track.Audio.Frames
+}
+
+// Preview streams one verified selection at fixed settings. It neither repeats
+// an enabled loop nor mutates state/sequences/events. Cancellation uses context.
+// Live transport stays unavailable until shared control/mapping are implemented.
+func (s *Session) Preview(ctx context.Context) (engine.PreviewReport, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.service.Previewer == nil {
+		return engine.PreviewReport{}, failure(UnsupportedCapability, errors.New("streaming preview is unavailable"))
+	}
+	if err := s.verify(ctx, s.source); err != nil {
+		return engine.PreviewReport{}, err
+	}
+	start, end := s.selection()
+	report, err := s.service.Previewer.Preview(ctx, engine.PreviewRequest{Source: s.source, StartFrame: start, EndFrame: end, Speed: s.p.Settings.Speed, Pitch: s.p.Settings.Pitch})
+	if err != nil {
+		return engine.PreviewReport{}, failure(HostFailure, err)
+	}
+	if report.Version != 1 || report.Channels != s.p.Track.Audio.Channels || report.SampleRate != s.p.Track.Audio.SampleRate ||
+		report.OutputFrames != int64(math.Round(float64(end-start)/s.p.Settings.Speed)) || report.CopiedFrames != report.OutputFrames {
+		return engine.PreviewReport{}, failure(HostFailure, errors.New("preview adapter returned inconsistent source/output diagnostics"))
+	}
+	return report, nil
 }
