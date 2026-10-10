@@ -74,7 +74,7 @@ jobs:
           cp LICENSE THIRD_PARTY_NOTICES.md build/package/
           cp "$(go env GOROOT)/LICENSE" build/package/licenses/go-LICENSE
           cp "$(go env GOROOT)/PATENTS" build/package/licenses/go-PATENTS
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: riffine-cli-${{ runner.os }}-${{ runner.arch }}
           path: build/package/
