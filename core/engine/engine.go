@@ -3,6 +3,9 @@ package engine
 
 import "context"
 
+// Source and Destination are opaque host resource handles, not core paths.
+// The native adapter interprets them as local paths. Ranges are source frames
+// with inclusive start and exclusive end. Rendering does not emit loop events.
 type RenderRequest struct {
 	Source      string
 	Destination string

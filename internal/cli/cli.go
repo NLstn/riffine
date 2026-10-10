@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/NLstn/riffine/adapters/filesystem"
 	"github.com/NLstn/riffine/adapters/native"
 	"github.com/NLstn/riffine/core/audio"
 	"github.com/NLstn/riffine/core/practice"
@@ -121,23 +122,35 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 		return writeJSON(map[string]any{"nativeHelper": path, "projectVersion": project.Version, "mode": "offline-render-then-play"})
 	}
 	if command == "tone" {
-		return audio.WriteTone(dest, seconds, hz, 48000, 1)
+		return filesystem.WriteTone(dest, seconds, hz, 48000, 1)
 	}
+	service := practice.Service{Resources: filesystem.Host{}, Store: filesystem.Host{}, Decoder: audio.WAVDecoder{}}
 	if command == "import" {
-		p, err := project.Import(source, dest)
+		session, err := service.Import(ctx, source, dest)
 		if err != nil {
 			return err
 		}
-		return project.Save(dest, p)
+		return session.SaveAs(ctx, dest)
 	}
-	p, err := project.Load(proj)
+	var adapter native.Adapter
+	if command == "render" || command == "play" {
+		helper, err := native.Find()
+		if err != nil {
+			return err
+		}
+		adapter = native.Adapter{Executable: helper, Stderr: errOut}
+		service.Renderer = adapter
+	}
+	session, err := service.Open(ctx, proj)
 	if err != nil {
 		return err
 	}
+	p := session.Snapshot().Project
+	var change *practice.Command
 	switch command {
 	case "inspect":
 		if verify {
-			if err = p.VerifyAudio(proj); err != nil {
+			if err = session.Verify(ctx); err != nil {
 				return err
 			}
 		}
@@ -146,11 +159,12 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 		if !provided["speed"] && !provided["pitch"] {
 			return errors.New("supply --speed and/or --pitch")
 		}
+		change = &practice.Command{Version: practice.APIVersion, Sequence: 1, Type: "set_parameters"}
 		if provided["speed"] {
-			p.Settings.Speed = speed
+			change.Speed = &speed
 		}
 		if provided["pitch"] {
-			p.Settings.Pitch = pitch
+			change.Pitch = &pitch
 		}
 	case "loop":
 		if enabled && (!provided["start"] || !provided["end"]) {
@@ -163,15 +177,13 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 		if provided["end"] {
 			p.Settings.Loop.End = end
 		}
+		change = &practice.Command{Version: practice.APIVersion, Sequence: 1, Type: "set_loop", Loop: &p.Settings.Loop}
 	case "relink":
-		if err = p.Relink(source, proj); err != nil {
+		if err = session.Relink(ctx, source); err != nil {
 			return err
 		}
 	case "waveform":
-		if err = p.VerifyAudio(proj); err != nil {
-			return err
-		}
-		w, e := audio.Peaks(p.AudioPath(proj), bins)
+		w, e := session.Waveform(ctx, bins)
 		if e != nil {
 			return e
 		}
@@ -190,13 +202,8 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 		}
 		return closeErr
 	case "render", "play":
-		helper, e := native.Find()
-		if e != nil {
-			return e
-		}
-		adapter := native.Adapter{Executable: helper, Stderr: errOut}
 		if command == "render" {
-			return practice.Render(ctx, adapter, proj, dest)
+			return session.Render(ctx, dest)
 		}
 		dir, e := os.MkdirTemp("", "riffine-play-")
 		if e != nil {
@@ -205,14 +212,16 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 		defer os.RemoveAll(dir)
 		wav := filepath.Join(dir, "practice.wav")
 		fmt.Fprintln(errOut, "Rendering locally before playback…")
-		if e = practice.Render(ctx, adapter, proj, wav); e != nil {
+		if e = session.Render(ctx, wav); e != nil {
 			return e
 		}
 		fmt.Fprintln(errOut, "Playing. Press Ctrl+C to stop.")
 		return adapter.Play(ctx, wav, p.Settings.Loop.Enabled)
 	}
-	if err = p.Rebase(proj, dest); err != nil {
-		return err
+	if change != nil {
+		if _, err := session.Dispatch(ctx, *change); err != nil {
+			return err
+		}
 	}
-	return project.Save(dest, p)
+	return session.SaveAs(ctx, dest)
 }

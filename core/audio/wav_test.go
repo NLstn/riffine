@@ -1,25 +1,26 @@
 package audio
 
 import (
+	"bytes"
+	"context"
 	"encoding/binary"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
 func TestToneAndPeaks(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "tone.wav")
-	if err := WriteTone(p, 1, 440, 48000, 2); err != nil {
+	var buffer bytes.Buffer
+	if err := WriteTone(&buffer, 1, 440, 48000, 2); err != nil {
 		t.Fatal(err)
 	}
-	i, err := Inspect(p)
+	p := memoryReader{bytes.NewReader(buffer.Bytes())}
+	i, err := Inspect(context.Background(), p)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if i.Frames != 48000 || i.Channels != 2 || i.Duration() != 1 || len(i.SHA256) != 64 {
 		t.Fatalf("bad metadata: %+v", i)
 	}
-	w, err := Peaks(p, 17)
+	w, err := Peaks(context.Background(), p, 17)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,21 +34,17 @@ func TestToneAndPeaks(t *testing.T) {
 			}
 		}
 	}
-	if err = WriteTone(p, 1, 440, 48000, 1); err == nil {
-		t.Fatal("overwrote existing file")
-	}
-	if _, err = Peaks(p, 0); err == nil {
+	if _, err = Peaks(context.Background(), p, 0); err == nil {
 		t.Fatal("accepted zero bins")
 	}
 }
 
 func TestMalformedWAV(t *testing.T) {
-	dir := t.TempDir()
-	base := filepath.Join(dir, "base.wav")
-	if err := WriteTone(base, .1, 440, 48000, 1); err != nil {
+	var buffer bytes.Buffer
+	if err := WriteTone(&buffer, .1, 440, 48000, 1); err != nil {
 		t.Fatal(err)
 	}
-	original, _ := os.ReadFile(base)
+	original := buffer.Bytes()
 	tests := map[string]func([]byte) []byte{
 		"truncated":       func(b []byte) []byte { return b[:20] },
 		"bad format":      func(b []byte) []byte { b[20] = 3; return b },
@@ -59,12 +56,9 @@ func TestMalformedWAV(t *testing.T) {
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
-			p := filepath.Join(dir, "bad.wav")
 			b := mutate(append([]byte(nil), original...))
-			if err := os.WriteFile(p, b, 0600); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := Inspect(p); err == nil {
+			p := memoryReader{bytes.NewReader(b)}
+			if _, err := Inspect(context.Background(), p); err == nil {
 				t.Fatal("accepted malformed WAV")
 			}
 		})
@@ -98,9 +92,8 @@ func TestIntegerDepthsAndOddChunk(t *testing.T) {
 			copy(b[46:], "data")
 			binary.LittleEndian.PutUint32(b[50:], uint32(len(data)))
 			copy(b[54:], data)
-			p := filepath.Join(t.TempDir(), "depth.wav")
-			os.WriteFile(p, b, 0600)
-			w, err := Peaks(p, 10)
+			p := memoryReader{bytes.NewReader(b)}
+			w, err := Peaks(context.Background(), p, 10)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -110,3 +103,8 @@ func TestIntegerDepthsAndOddChunk(t *testing.T) {
 		})
 	}
 }
+
+type memoryReader struct{ *bytes.Reader }
+
+func (memoryReader) Name() string { return "tone.wav" }
+func (memoryReader) Close() error { return nil }

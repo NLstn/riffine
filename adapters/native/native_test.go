@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NLstn/riffine/core/audio"
+	"github.com/NLstn/riffine/adapters/filesystem"
 	"github.com/NLstn/riffine/core/engine"
 )
 
 func TestRenderRejectsInvalidRequest(t *testing.T) {
 	d := t.TempDir()
 	source := filepath.Join(d, "tone.wav")
-	audio.WriteTone(source, 1, 440, 48000, 1)
+	filesystem.WriteTone(source, 1, 440, 48000, 1)
 	a := Adapter{Executable: "missing-helper"}
 	for _, speed := range []float64{0, math.NaN(), 3} {
 		err := a.Render(context.Background(), engine.RenderRequest{Source: source, Destination: filepath.Join(d, "out.wav"), EndFrame: 48000, Speed: speed})
@@ -42,7 +42,7 @@ func TestNativeDSP(t *testing.T) {
 			d := t.TempDir()
 			source := filepath.Join(d, "guitär 音.wav")
 			dest := filepath.Join(d, "rendér 音.wav")
-			if err := audio.WriteTone(source, 3, 440, 48000, tc.channels); err != nil {
+			if err := filesystem.WriteTone(source, 3, 440, 48000, tc.channels); err != nil {
 				t.Fatal(err)
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -51,7 +51,7 @@ func TestNativeDSP(t *testing.T) {
 			if err := a.Render(ctx, engine.RenderRequest{Source: source, Destination: dest, StartFrame: 24000, EndFrame: 120000, Speed: tc.speed, Pitch: tc.pitch}); err != nil {
 				t.Fatal(err)
 			}
-			i, err := audio.Inspect(dest)
+			i, err := filesystem.Inspect(context.Background(), dest)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -97,7 +97,7 @@ func TestNativeDSP(t *testing.T) {
 	t.Run("short-loop", func(t *testing.T) {
 		d := t.TempDir()
 		src := filepath.Join(d, "short.wav")
-		audio.WriteTone(src, .01, 440, 48000, 1)
+		filesystem.WriteTone(src, .01, 440, 48000, 1)
 		dest := filepath.Join(d, "out.wav")
 		if err := a.Render(context.Background(), engine.RenderRequest{Source: src, Destination: dest, EndFrame: 480, Speed: .25}); err != nil {
 			t.Fatal(err)
@@ -106,7 +106,7 @@ func TestNativeDSP(t *testing.T) {
 	t.Run("cancelled", func(t *testing.T) {
 		d := t.TempDir()
 		src := filepath.Join(d, "src.wav")
-		audio.WriteTone(src, 1, 440, 48000, 1)
+		filesystem.WriteTone(src, 1, 440, 48000, 1)
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		dest := filepath.Join(d, "out.wav")

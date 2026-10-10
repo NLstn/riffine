@@ -1,0 +1,21 @@
+{
+  "fixtureVersion": 1,
+  "apiVersion": 1,
+  "name": "independent parameters and source-time selection",
+  "audio": {"name": "tone.wav", "seconds": 1, "hz": 440, "sampleRate": 48000, "channels": 1},
+  "steps": [
+    {"command": {"version": 1, "sequence": 1, "type": "set_parameters", "speed": 0.5, "pitch": 3}, "sequence": 1, "speed": 0.5, "pitch": 3, "loop": {"enabled": false, "start": 0, "end": 1}},
+    {"command": {"version": 1, "sequence": 2, "type": "set_loop", "loop": {"enabled": true, "start": 0.25, "end": 0.75}}, "sequence": 2, "speed": 0.5, "pitch": 3, "loop": {"enabled": true, "start": 0.25, "end": 0.75}},
+    {"command": {"version": 1, "sequence": 2, "type": "set_parameters", "speed": 1}, "error": "out_of_order", "sequence": 2, "speed": 0.5, "pitch": 3, "loop": {"enabled": true, "start": 0.25, "end": 0.75}},
+    {"command": {"version": 1, "sequence": 3, "type": "set_parameters", "pitch": 13}, "error": "invalid_command", "sequence": 2, "speed": 0.5, "pitch": 3, "loop": {"enabled": true, "start": 0.25, "end": 0.75}},
+    {"command": {"version": 99, "sequence": 3, "type": "set_parameters", "speed": 1}, "error": "unsupported_version", "sequence": 2, "speed": 0.5, "pitch": 3, "loop": {"enabled": true, "start": 0.25, "end": 0.75}},
+    {"command": {"version": 1, "sequence": 3, "type": "play"}, "error": "unsupported_capability", "sequence": 2, "speed": 0.5, "pitch": 3, "loop": {"enabled": true, "start": 0.25, "end": 0.75}},
+    {"command": {"version": 1, "sequence": 3, "type": "set_parameters", "speed": 0.75}, "sequence": 3, "speed": 0.75, "pitch": 3, "loop": {"enabled": true, "start": 0.25, "end": 0.75}}
+  ],
+  "events": [
+    {"version": 1, "sequence": 1, "type": "session_changed"},
+    {"version": 1, "sequence": 2, "type": "session_changed"},
+    {"version": 1, "sequence": 3, "type": "session_changed"}
+  ],
+  "render": {"startFrame": 12000, "endFrame": 36000, "speed": 0.75, "pitch": 3}
+}
