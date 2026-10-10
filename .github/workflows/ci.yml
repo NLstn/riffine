@@ -56,6 +56,7 @@ jobs:
           cache: false
       - run: cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build/native --config Release
+      - run: ctest --test-dir build/native -C Release --output-on-failure --no-tests=error
       - run: cmake --install build/native --config Release --prefix build/package
       - if: runner.os == 'Windows'
         shell: pwsh
