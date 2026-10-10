@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Riffine cross-host feasibility harness</title>
+<style>body{max-width:70rem;margin:3rem auto;padding:0 1.5rem;font:16px system-ui}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f4f4f4;padding:1.2rem}</style>
+<h1>Shared Go core feasibility harness</h1>
+<p>This runs the shared fixture locally in a browser worker. It produces no audio.</p>
+<pre id="result">Starting Go/WASM…</pre>
+<script type="module">
+const fixture = await (await fetch('./fixture.json')).text();
+const worker = new Worker('./worker.js');
+window.spikeDone = new Promise((resolve,reject) => {
+  const timeout = setTimeout(() => reject(new Error('worker timed out')),30000);
+  let startup;
+  worker.onerror = error => { clearTimeout(timeout); reject(new Error(error.message)); };
+  worker.onmessage = ({data}) => {
+    if(data.type==='ready') { startup=data; worker.postMessage({id:1,fixture}); }
+    if(data.type==='fatal') { clearTimeout(timeout); reject(new Error(data.error)); }
+    if(data.type==='result') {
+      clearTimeout(timeout);
+      const result = {...data,startupMs:startup.startupMs,initialMemoryBytes:startup.memoryBytes};
+      document.querySelector('#result').textContent=JSON.stringify(result,null,2);
+      resolve(result);
+    }
+  };
+});
+window.spikeDone.catch(error => {document.querySelector('#result').textContent=String(error);});
+</script>
+</html>
