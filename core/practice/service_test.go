@@ -440,3 +440,73 @@ func TestAnnotationsSessionOwnershipSaveAndRelink(t *testing.T) {
 		t.Fatal("partial project published")
 	}
 }
+
+type revisionMemory struct {
+	*memoryHost
+	revisions map[string][]byte
+}
+
+func (h *revisionMemory) Update(ctx context.Context, document, revision string, b []byte) (resource.UpdateResult, error) {
+	var result resource.UpdateResult
+	if e := ctx.Err(); e != nil {
+		return result, e
+	}
+	old := h.data[document]
+	if resource.Revision(old) != revision {
+		return result, resource.ErrRevisionConflict
+	}
+	if h.failWrite {
+		return result, errors.New("injected update failure")
+	}
+	result.Recovery = "recovery:" + revision
+	h.revisions[result.Recovery] = append([]byte(nil), old...)
+	h.data[document] = append([]byte(nil), b...)
+	result.Revision = resource.Revision(b)
+	return result, nil
+}
+func TestSessionSaveRevisionsAndRecovery(t *testing.T) {
+	imported, host, _ := newSession(t)
+	ctx := context.Background()
+	if e := imported.SaveAs(ctx, "opaque:project"); e != nil {
+		t.Fatal(e)
+	}
+	revisionHost := &revisionMemory{memoryHost: host, revisions: map[string][]byte{}}
+	service := imported.service
+	service.Store = revisionHost
+	first, e := service.Open(ctx, "opaque:project")
+	if e != nil {
+		t.Fatal(e)
+	}
+	stale, e := service.Open(ctx, "opaque:project")
+	if e != nil {
+		t.Fatal(e)
+	}
+	old := append([]byte(nil), host.data["opaque:project"]...)
+	speed := .6
+	_, e = first.Dispatch(ctx, Command{Version: 1, Sequence: 1, Type: "set_parameters", Speed: &speed})
+	errorCode(t, e, "")
+	result, e := first.Save(ctx)
+	errorCode(t, e, "")
+	if result.Revision != first.Snapshot().Revision || !bytes.Equal(revisionHost.revisions[result.Recovery], old) || first.Snapshot().Sequence != 1 {
+		t.Fatal(result, first.Snapshot())
+	}
+	_, e = stale.Save(ctx)
+	errorCode(t, e, RevisionConflict)
+	if !errors.Is(e, resource.ErrRevisionConflict) {
+		t.Fatal("lost conflict cause")
+	}
+	latest := append([]byte(nil), host.data["opaque:project"]...)
+	before := first.Snapshot()
+	host.failWrite = true
+	_, e = first.Save(ctx)
+	errorCode(t, e, HostFailure)
+	if !bytes.Equal(latest, host.data["opaque:project"]) || !reflect.DeepEqual(before, first.Snapshot()) {
+		t.Fatal("failed save lost latest state")
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	_, e = first.Save(cancelled)
+	errorCode(t, e, Cancelled)
+	_, e = imported.Save(ctx)
+	errorCode(t, e, UnsupportedCapability)
+}

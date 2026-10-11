@@ -26,6 +26,7 @@ const Help = `Riffine — local guitar practice core (working name)
   riffine set      --project song.riffine.json --out slow.riffine.json [--speed 0.75 --pitch -2]
   riffine loop     --project slow.riffine.json --out loop.riffine.json --start 1 --end 3 [--enabled=true]
   riffine relink   --project song.riffine.json --audio relocated.wav --out relinked.riffine.json
+  riffine save     --project song.riffine.json [--speed 0.75 --pitch -2]
   riffine annotate --project song.riffine.json --out annotated.riffine.json --annotations notes.json
   riffine waveform --project song.riffine.json [--bins 1000 --out song.peaks.json]
   riffine render   --project song.riffine.json --out practice.wav
@@ -33,7 +34,7 @@ const Help = `Riffine — local guitar practice core (working name)
   riffine preview  --project song.riffine.json [--silent]
   riffine doctor
 
-Flags precede no positional arguments. Existing output files are never replaced.
+Flags precede no positional arguments. Outputs are exclusive; save updates a verified project revision with recovery.
 Render processes the enabled loop once; play repeats it until Ctrl+C.
 Play renders a temporary WAV first. Speed/pitch changes are offline in this slice.
 Preview streams the selected range once, with fixed speed/pitch; --silent uses a null device.
@@ -63,9 +64,11 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 	case "inspect":
 		f.StringVar(&proj, "project", "", "project path")
 		f.BoolVar(&verify, "verify", false, "verify source fingerprint")
-	case "set":
+	case "set", "save":
 		f.StringVar(&proj, "project", "", "project path")
-		f.StringVar(&dest, "out", "", "new project path")
+		if command == "set" {
+			f.StringVar(&dest, "out", "", "new project path")
+		}
 		f.Float64Var(&speed, "speed", 1, "source/output time ratio, 0.25–2")
 		f.Float64Var(&pitch, "pitch", 0, "semitones, -12–12")
 	case "loop":
@@ -180,8 +183,12 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 			return e
 		}
 		change = &practice.Command{Version: practice.APIVersion, Sequence: 1, Type: "set_annotations", Annotations: &a}
-	case "set":
+	case "set", "save":
+
 		if !provided["speed"] && !provided["pitch"] {
+			if command == "save" {
+				break
+			}
 			return errors.New("supply --speed and/or --pitch")
 		}
 		change = &practice.Command{Version: practice.APIVersion, Sequence: 1, Type: "set_parameters"}
@@ -254,6 +261,16 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 		if _, err := session.Dispatch(ctx, *change); err != nil {
 			return err
 		}
+	}
+	if command == "save" {
+		result, e := session.Save(ctx)
+		if e != nil {
+			if result.Recovery != "" {
+				fmt.Fprintf(errOut, "Previous valid session recovery: %s\n", result.Recovery)
+			}
+			return e
+		}
+		return writeJSON(result)
 	}
 	return session.SaveAs(ctx, dest)
 }
