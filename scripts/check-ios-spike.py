@@ -20,7 +20,17 @@ def run(*args, timeout=30):
         print(error.stderr[-4096:], file=sys.stderr)
         raise
 
-inventory = json.loads(run("xcrun", "simctl", "list", "devices", "available", "--json").stdout)
+# A cold CI CoreSimulator service can take more than 30 seconds to initialize.
+# Retry inventory only; actual fixture failures are never retried or skipped.
+for attempt in range(3):
+    try:
+        inventory = json.loads(run("xcrun", "simctl", "list", "devices", "available", "--json", timeout=60).stdout)
+        break
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+        if attempt == 2:
+            raise
+        print(f"CoreSimulator inventory not ready; retry {attempt + 1}/2", file=sys.stderr)
+
 candidates = [(runtime, device) for runtime, devices in inventory["devices"].items()
               if ".iOS-" in runtime for device in devices
               if device.get("isAvailable") and "iPhone" in device["name"]]
