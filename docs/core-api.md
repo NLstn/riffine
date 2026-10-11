@@ -66,8 +66,9 @@ Speed is source/output duration ratio (0.25–2), pitch is independent semitones
 
 Each new session starts at sequence 0. Successful commands require the next
 contiguous positive sequence. Concurrent commands are serialized; only one command
-with a given sequence succeeds. Failed commands/cancellation do not mutate state,
-consume a sequence or emit an event. Repeated, stale or skipped sequences return
+with a given sequence succeeds. Validation failures and cancellation before execution leave state and sequence
+unchanged. Device failures can suspend playback and expose an error snapshot;
+they do not commit project edits or consume a successful command sequence. Repeated, stale or skipped sequences return
 `out_of_order`; read a snapshot to recover. There is no automatic retry/replay of
 side effects. `Relink` is an ordered Go operation that increments the sequence and
 emits `source_relinked`; use its resulting snapshot before sending another edit.
@@ -87,10 +88,14 @@ hashing and peaks check cancellation between reader calls.
 
 Capabilities include tested decoder formats, `offlineRender`, optional
 `streamPreview` (omitted when unavailable), and `liveTransport`.
-The supplied WAV decoder reports `wav-pcm`; live transport is always false in this
-slice. Missing render/preview adapters cause explicit capability errors. Browser extension
-lists must not override these host capability reports. Do not expose play/pause,
-seek or routines through this API until their core behavior is implemented.
+The supplied WAV decoder reports `wav-pcm`. A configured live factory alone does
+not advertise playback: `Session.AttachTransport` must verify the source and load
+a presentation-aware device successfully. The optional `transport` snapshot then
+contains source position, device output position, generation, counts and errors.
+Missing adapters cause explicit capability errors. Browser extension lists must
+not override these reports. Current production hosts have no live factory; the
+browser workspace therefore continues to disable playback. See
+[session transport binding](validation/session-transport-binding.md).
 
 ## Time, ranges and future device acknowledgement
 
@@ -112,9 +117,9 @@ output sample rate. It drains bounded ordered acknowledgements of consumed outpu
 and resets schedules by generation. No sample arrays or Go callbacks pass through
 this control API. Adapters execute precompiled work from preallocated queues.
 Acknowledgement overflow must fail explicitly and invalidate playback, never drop
-loop completions. #14/#15 still need exact generation/reset rules, source/output
-mapping, latency compensation, click-free boundaries and failure recovery; these
-interfaces must be revised against those measurements before stabilization.
+loop completions. The shared controller implements generation/reset rules, source/output mapping
+and recovery. #15 still requires production adapters with measured presentation
+latency and audible boundary validation before these interfaces stabilize.
 
 ## Events and backpressure
 
@@ -223,3 +228,30 @@ rules move into JavaScript. Close releases retained waveform resources. The brow
 worker uses selected immutable Files and advertises only its actual WAV capability;
 failed/cancelled session replacement preserves the previous active session.
 See [browser binding evidence](validation/browser-practice.md).
+
+## Session transport commands
+
+After explicit attachment, the same session command sequence accepts `play`,
+`pause`, `stop`, `restart`, `recover` and `seek` (`position`: an integer source
+frame inside the active selection). Transport commands reject all unrelated edit
+fields. Existing `set_parameters`/`set_loop` edits update the attached controller
+before committing the project. Annotations and saved plan definitions remain
+editable while a device needs recovery. Runtime plan execution is not yet routed
+through this session API.
+
+`AttachTransport` and successful nonempty `DetachTransport` each advance the
+session sequence. Internal engine sequences are independent: annotation edits
+never create gaps in the engine command stream. `PollTransport` consumes bounded
+device acknowledgements without advancing the session command sequence. Session
+events carry an optional `transport` payload with the engine generation and
+schedule sequence. A dropped notification requires refreshing the accompanying
+snapshot; live runtime counters are not persisted as practice history.
+
+`recover` reloads committed project settings, discards runtime counts/plans and
+leaves output stopped. A failed parameter edit cannot become the next playback's
+speed after recovery. Verified relinking closes the old device before releasing
+its source; the host must explicitly attach again. `CloseTransport` is unconditional
+teardown, independent of command sequence limits. The JSON binding exposes
+`attach_transport`, `detach_transport`, `poll_transport`; closing the bridge
+releases both waveform and live handles. See the validation record for ownership,
+error and host-conformance evidence.

@@ -131,6 +131,10 @@ func (t *Transport) fail(err error) error {
 	t.snapshot.Error = err.Error()
 	return err
 }
+func (t *Transport) failedSnapshot(err error) (TransportSnapshot, error) {
+	t.fail(err)
+	return t.currentSnapshot(), err
+}
 func (t *Transport) bounds() (int64, int64) {
 	c := t.snapshot.Config
 	if c.LoopEnabled {
@@ -333,7 +337,7 @@ func (t *Transport) Poll(ctx context.Context) (TransportSnapshot, error) {
 	}
 	acks, err := t.device.DrainAcknowledgements(ctx, transportEventCapacity)
 	if err != nil {
-		return t.currentSnapshot(), t.fail(err)
+		return t.failedSnapshot(err)
 	}
 	if err = t.acknowledge(acks); err != nil {
 		_, stopErr := t.device.Suspend(ctx)
@@ -526,7 +530,7 @@ func (t *Transport) Dispatch(ctx context.Context, c TransportCommand) (Transport
 		switch c.Type {
 		case "restart", "seek", "set_loop", "stop", "recover":
 			if err := t.planRun.Restart(generation); err != nil {
-				return t.currentSnapshot(), t.fail(err)
+				return t.failedSnapshot(err)
 			}
 			t.snapshot.Config.Speed = t.planRun.Plan().Definition().StartSpeed
 			t.autoResumePlan = true
@@ -536,18 +540,18 @@ func (t *Transport) Dispatch(ctx context.Context, c TransportCommand) (Transport
 		case "pause":
 			t.planRun.Pause()
 			if err := t.planRun.Rebind(generation); err != nil {
-				return t.currentSnapshot(), t.fail(err)
+				return t.failedSnapshot(err)
 			}
 		case "play", "resume_plan":
 			if c.Type == "resume_plan" || t.autoResumePlan && t.snapshot.Config.LoopEnabled && t.planRun.Snapshot().State == "paused" {
 				if err := t.planRun.Resume(generation); err != nil {
-					return t.currentSnapshot(), t.fail(err)
+					return t.failedSnapshot(err)
 				}
 				t.snapshot.Config.Speed = t.planRun.Snapshot().Speed
 				t.autoResumePlan = true
 			} else {
 				if err := t.planRun.Rebind(generation); err != nil {
-					return t.currentSnapshot(), t.fail(err)
+					return t.failedSnapshot(err)
 				}
 			}
 		default:
@@ -556,7 +560,7 @@ func (t *Transport) Dispatch(ctx context.Context, c TransportCommand) (Transport
 				t.autoResumePlan = false
 			}
 			if err := t.planRun.Rebind(generation); err != nil {
-				return t.currentSnapshot(), t.fail(err)
+				return t.failedSnapshot(err)
 			}
 		}
 	}
@@ -567,7 +571,7 @@ func (t *Transport) Dispatch(ctx context.Context, c TransportCommand) (Transport
 			return t.currentSnapshot(), err
 		}
 		if err := t.device.Start(ctx); err != nil {
-			return t.currentSnapshot(), t.fail(err)
+			return t.failedSnapshot(err)
 		}
 	}
 	t.snapshot.Sequence = c.Sequence
