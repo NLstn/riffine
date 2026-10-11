@@ -61,4 +61,12 @@ try:
     print(json.dumps(metrics, indent=2))
 finally:
     if booted_here:
-        run("xcrun", "simctl", "shutdown", udid)
+        # Hosted CoreSimulator shutdown can outlast the default control timeout.
+        # Keep cleanup bounded and preserve a preceding conformance failure.
+        prior_failure = sys.exc_info()[0] is not None
+        try:
+            run("xcrun", "simctl", "shutdown", udid, timeout=120)
+        except subprocess.SubprocessError:
+            if not prior_failure:
+                raise
+            print("Simulator cleanup also failed; preserving the fixture failure", file=sys.stderr)
