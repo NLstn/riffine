@@ -14,6 +14,7 @@ import (
 )
 
 func TestScanLocalSources(t *testing.T) {
+	t.Setenv("RIFFINE_AUDIO_HELPER", filepath.Join(t.TempDir(), "missing-helper"))
 	dir := t.TempDir()
 	tone := filepath.Join(dir, "音楽.wav")
 	if err := filesystem.WriteTone(tone, .01, 440, 48000, 1); err != nil {

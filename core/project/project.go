@@ -13,7 +13,7 @@ import (
 	"github.com/NLstn/riffine/core/audio"
 )
 
-const Version = 3
+const Version = 4
 
 type Loop struct {
 	Enabled bool    `json:"enabled"`
@@ -47,7 +47,7 @@ func (p Project) Validate() error {
 		return errors.New("name and track path are required")
 	}
 	i := p.Track.Audio
-	if i.SampleRate < 8000 || i.SampleRate > 192000 || i.Channels < 1 || i.Channels > 2 || i.Frames <= 0 || i.Frames > int64(^uint32(0))/int64(i.Channels*2) || (i.Bits != 16 && i.Bits != 24 && i.Bits != 32) {
+	if i.SampleRate < 8000 || i.SampleRate > 192000 || i.Channels < 1 || i.Channels > 2 || i.Frames <= 0 || i.Frames > 1<<48 || (i.Encoding == "wav-pcm" && i.Frames > int64(^uint32(0))/int64(i.Channels*2)) || !validCodec(i) {
 		return errors.New("invalid track metadata")
 	}
 	h, err := hex.DecodeString(i.SHA256)
@@ -74,9 +74,12 @@ func (p Project) Validate() error {
 	return p.validatePlans()
 }
 
-// New builds a version-3 document. Reference is a host-produced locator;
+// New builds a version-4 document. Reference is a host-produced locator;
 // content identity is the fingerprint and metadata, never the locator.
 func New(name, reference string, info audio.Info) (Project, error) {
+	if info.Encoding == "" && (info.Bits == 16 || info.Bits == 24 || info.Bits == 32) {
+		info.Encoding = "wav-pcm"
+	}
 	info.DataOffset, info.DataBytes = 0, 0 // Decoder cursor details are not document metadata.
 	p := Project{Version: Version, Name: name, Track: Track{Path: reference, Audio: info}, Settings: Settings{Speed: 1, Loop: Loop{End: info.Duration()}}}
 	return p, p.Validate()
@@ -99,8 +102,8 @@ func Decode(r io.Reader) (Project, error) {
 	if err = json.Unmarshal(b, &header); err != nil {
 		return Project{}, err
 	}
-	if header.Version != 1 && header.Version != 2 && header.Version != Version {
-		return Project{}, fmt.Errorf("unsupported project version %d (supported: 1, 2 and %d)", header.Version, Version)
+	if header.Version != 1 && header.Version != 2 && header.Version != 3 && header.Version != Version {
+		return Project{}, fmt.Errorf("unsupported project version %d (supported: 1, 2, 3 and %d)", header.Version, Version)
 	}
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
@@ -108,15 +111,15 @@ func Decode(r io.Reader) (Project, error) {
 	if header.Version == 1 {
 		// A distinct schema prevents v2 fields from being accepted under a v1 label.
 		var old struct {
-			Version  int      `json:"version"`
-			Name     string   `json:"name"`
-			Track    Track    `json:"track"`
-			Settings Settings `json:"settings"`
+			Version  int         `json:"version"`
+			Name     string      `json:"name"`
+			Track    legacyTrack `json:"track"`
+			Settings Settings    `json:"settings"`
 		}
 		if err = dec.Decode(&old); err != nil {
 			return Project{}, err
 		}
-		p = Project{Version: Version, Name: old.Name, Track: old.Track, Settings: old.Settings}
+		p = Project{Version: Version, Name: old.Name, Track: old.Track.current(), Settings: old.Settings}
 		if (old.Settings.Loop.End-old.Settings.Loop.Start)*float64(old.Track.Audio.SampleRate) >= 1 {
 			p.Annotations.Regions = []Region{{ID: "region-v1-loop", Label: "Saved loop", Start: old.Settings.Loop.Start, End: old.Settings.Loop.End}}
 			p.Annotations.Loops = []NamedLoop{{ID: "loop-v1", Label: "Saved loop", RegionID: "region-v1-loop"}}
@@ -125,14 +128,27 @@ func Decode(r io.Reader) (Project, error) {
 		var old struct {
 			Version     int         `json:"version"`
 			Name        string      `json:"name"`
-			Track       Track       `json:"track"`
+			Track       legacyTrack `json:"track"`
 			Settings    Settings    `json:"settings"`
 			Annotations Annotations `json:"annotations"`
 		}
 		if err = dec.Decode(&old); err != nil {
 			return Project{}, err
 		}
-		p = Project{Version: Version, Name: old.Name, Track: old.Track, Settings: old.Settings, Annotations: old.Annotations}
+		p = Project{Version: Version, Name: old.Name, Track: old.Track.current(), Settings: old.Settings, Annotations: old.Annotations}
+	} else if header.Version == 3 {
+		var old struct {
+			Version       int            `json:"version"`
+			Name          string         `json:"name"`
+			Track         legacyTrack    `json:"track"`
+			Settings      Settings       `json:"settings"`
+			Annotations   Annotations    `json:"annotations"`
+			PracticePlans []PracticePlan `json:"practicePlans,omitempty"`
+		}
+		if err = dec.Decode(&old); err != nil {
+			return Project{}, err
+		}
+		p = Project{Version: Version, Name: old.Name, Track: old.Track.current(), Settings: old.Settings, Annotations: old.Annotations, PracticePlans: old.PracticePlans}
 	} else {
 		if err = dec.Decode(&p); err != nil {
 			return Project{}, err
@@ -161,8 +177,39 @@ func Encode(p Project) ([]byte, error) {
 
 func (p Project) VerifyIdentity(i audio.Info) error {
 	old := p.Track.Audio
-	if i.SHA256 != old.SHA256 || i.Frames != old.Frames || i.SampleRate != old.SampleRate || i.Channels != old.Channels || i.Bits != old.Bits {
+	if i.Encoding == "" && (i.Bits == 16 || i.Bits == 24 || i.Bits == 32) {
+		i.Encoding = "wav-pcm"
+	}
+	if i.Encoding != old.Encoding || i.SHA256 != old.SHA256 || i.Frames != old.Frames || i.SampleRate != old.SampleRate || i.Channels != old.Channels || i.Bits != old.Bits {
 		return errors.New("audio does not match project fingerprint/metadata; relink the original file")
 	}
 	return nil
+}
+
+// Old schemas deliberately lack codec fields: v1–v3 described PCM WAV only.
+// Separate decoding structs reject new codec metadata under an old label.
+type legacyTrack struct {
+	Path  string `json:"path"`
+	Audio struct {
+		SampleRate int    `json:"sampleRate"`
+		Channels   int    `json:"channels"`
+		Bits       int    `json:"bits"`
+		Frames     int64  `json:"frames"`
+		SHA256     string `json:"sha256"`
+	} `json:"audio"`
+}
+
+func (t legacyTrack) current() Track {
+	return Track{Path: t.Path, Audio: audio.Info{Encoding: "wav-pcm", SampleRate: t.Audio.SampleRate, Channels: t.Audio.Channels, Bits: t.Audio.Bits, Frames: t.Audio.Frames, SHA256: t.Audio.SHA256}}
+}
+func validCodec(i audio.Info) bool {
+	switch i.Encoding {
+	case "wav-pcm":
+		return i.Bits == 16 || i.Bits == 24 || i.Bits == 32
+	case "flac":
+		return i.Bits == 0 || (i.Bits >= 4 && i.Bits <= 32)
+	case "mp3":
+		return i.Bits == 0
+	}
+	return false
 }

@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/NLstn/riffine/adapters/filesystem"
+	"github.com/NLstn/riffine/adapters/native"
 	"github.com/NLstn/riffine/core/audio"
 	"github.com/NLstn/riffine/core/library"
 )
@@ -39,7 +40,7 @@ func scanSources(ctx context.Context, source string, out io.Writer) error {
 	if len(locators) == 0 || len(locators) > library.MaxEntries {
 		return errors.New("source list requires 1–100000 locators within 1 MiB")
 	}
-	decoder := audio.WAVDecoder{}
+	decoder := localDecoder(ctx, io.Discard)
 	idx, err := library.New(filesystem.Host{}, decoder, &locatorSource{document: source, locators: locators})
 	if err != nil {
 		return err
@@ -91,4 +92,14 @@ func (s *locatorSource) Next(ctx context.Context) (library.Candidate, error) {
 	}
 	s.next++
 	return library.Candidate{Handle: handle, Name: filepath.Base(filepath.FromSlash(locator))}, nil
+}
+
+func localDecoder(ctx context.Context, stderr io.Writer) audio.Decoder {
+	helper, err := native.Find()
+	if err == nil {
+		if decoder, err := native.NewDecoder(ctx, native.Adapter{Executable: helper, Stderr: stderr}); err == nil {
+			return decoder
+		}
+	}
+	return audio.WAVDecoder{}
 }

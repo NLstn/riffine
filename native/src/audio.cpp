@@ -1,4 +1,5 @@
 #include "riffine_audio.h"
+#include "riffine_decode.h"
 #define NOMINMAX
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
@@ -16,16 +17,14 @@ void error_text(char *buffer, size_t size, const char *message) {
   if (buffer && size) std::snprintf(buffer, size, "%s", message);
 }
 struct Decoder {
-  ma_decoder value{};
-  explicit Decoder(const char *path) {
-    auto config = ma_decoder_config_init(ma_format_f32, 0, 0);
-#ifdef _WIN32
-    require(ma_decoder_init_file_w(std::filesystem::u8path(path).c_str(), &config, &value) == MA_SUCCESS, "cannot decode input WAV");
-#else
-    require(ma_decoder_init_file(path, &config, &value) == MA_SUCCESS, "cannot decode input WAV");
-#endif
-  }
-  ~Decoder() { ma_decoder_uninit(&value); }
+ riffine_decoder *value=nullptr;
+ riffine_decoder_info info{};
+ explicit Decoder(const char *path) {
+  char error[512];
+  if(riffine_decoder_open_file(path,&value,error,sizeof(error)))throw std::runtime_error(error);
+  if(riffine_decoder_info_get(value,&info,error,sizeof(error))){riffine_decoder_close(value);value=nullptr;throw std::runtime_error(error);}
+ }
+ ~Decoder(){riffine_decoder_close(value);}
 };
 struct Encoder {
   ma_encoder value{};
@@ -84,14 +83,13 @@ int riffine_render(const char *input, const char *output, int64_t start, int64_t
     require(!std::filesystem::exists(std::filesystem::u8path(output)), "output already exists");
     require(std::isfinite(speed) && speed >= .25 && speed <= 2 && std::isfinite(semitones) && semitones >= -12 && semitones <= 12, "invalid speed or pitch");
     Decoder decoder(input);
-    auto &d = decoder.value;
-    ma_uint64 length = 0;
-    require(ma_decoder_get_length_in_pcm_frames(&d, &length) == MA_SUCCESS, "unknown source length");
+    auto &d = decoder.info;
+    auto length = d.frames;
     require(start >= 0 && end > start && uint64_t(end) <= length, "invalid frame selection");
-    require(d.outputChannels >= 1 && d.outputChannels <= 2 && d.outputSampleRate >= 8000 && d.outputSampleRate <= 192000, "unsupported audio format");
-    auto channels = d.outputChannels;
+    require(d.channels >= 1 && d.channels <= 2 && d.sample_rate >= 8000 && d.sample_rate <= 192000, "unsupported audio format");
+    auto channels = d.channels;
     signalsmith::stretch::SignalsmithStretch<float> stretch;
-    stretch.presetDefault(channels, d.outputSampleRate);
+    stretch.presetDefault(channels, d.sample_rate);
     stretch.setTransposeSemitones(semitones);
     int64_t selected = end-start;
     // Pad short selections to the algorithm's required preroll, then truncate.
@@ -102,19 +100,19 @@ int riffine_render(const char *input, const char *output, int64_t start, int64_t
     require((padded+paddedOutput)*channels <= 64*1024*1024, "offline buffer limit (256 MiB) exceeded; select a shorter loop");
     std::vector<std::vector<float>> in(channels, std::vector<float>(size_t(padded), 0));
     std::vector<std::vector<float>> out(channels, std::vector<float>(size_t(paddedOutput), 0));
-    require(ma_decoder_seek_to_pcm_frame(&d, start) == MA_SUCCESS, "cannot seek input");
+    char decodeError[512];
+    require(riffine_decoder_seek(decoder.value,uint64_t(start),decodeError,sizeof(decodeError))==0,"cannot seek input");
     std::vector<float> block(4096*channels);
     for (int64_t offset=0; offset<selected;) {
-      auto count=ma_uint64(std::min<int64_t>(4096,selected-offset)); ma_uint64 read=0;
-      auto result=ma_decoder_read_pcm_frames(&d,block.data(),count,&read);
-      require((result==MA_SUCCESS || result==MA_AT_END) && read==count,"truncated audio data");
+      auto count=uint32_t(std::min<int64_t>(4096,selected-offset)); uint32_t read=0;
+      require(riffine_decoder_read(decoder.value,block.data(),count,&read,decodeError,sizeof(decodeError))==0 && read==count,"truncated audio data");
       for(ma_uint64 i=0;i<count;++i) for(unsigned c=0;c<channels;++c) in[c][size_t(offset+i)]=block[size_t(i*channels+c)];
       offset+=int64_t(count);
     }
     require(stretch.exact(in,int(padded),out,int(paddedOutput)), "DSP failed to process selection");
     // A short fade reduces clicks when a rendered selection is repeated.
-    auto fade=std::min<int64_t>(std::llround(d.outputSampleRate*.005),outputFrames/2);
-    Encoder encoder(output,channels,d.outputSampleRate);
+    auto fade=std::min<int64_t>(std::llround(d.sample_rate*.005),outputFrames/2);
+    Encoder encoder(output,channels,d.sample_rate);
     std::vector<int16_t> pcm(4096*channels);
     for(int64_t offset=0;offset<outputFrames;) {
       auto count=ma_uint64(std::min<int64_t>(4096,outputFrames-offset));

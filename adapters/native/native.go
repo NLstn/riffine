@@ -60,7 +60,7 @@ func (a Adapter) run(ctx context.Context, args ...string) error {
 	return nil
 }
 func (a Adapter) Render(ctx context.Context, r engine.RenderRequest) error {
-	i, err := filesystem.Inspect(ctx, r.Source)
+	i, err := a.inspectSource(ctx, r.Source)
 	if err != nil {
 		return err
 	}

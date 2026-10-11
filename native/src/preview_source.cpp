@@ -1,7 +1,6 @@
 #include "riffine_preview.h"
 #include "riffine_stream.h"
-#define NOMINMAX
-#include "miniaudio.h"
+#include "riffine_decode.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -10,8 +9,8 @@
 #include <stdexcept>
 #include <vector>
 struct riffine_preview_source {
-  ma_decoder decoder{};
-  bool opened=false,flushed=false,failed=false;
+  riffine_decoder *decoder=nullptr;
+  bool flushed=false,failed=false;
   riffine_stream *stream=nullptr;
   riffine_stream_limits limits{};
   uint64_t remaining=0,decoded=0,expected=0,emitted=0,discard=0,fade=0;
@@ -19,7 +18,7 @@ struct riffine_preview_source {
   std::vector<float> input,raw;
   ~riffine_preview_source() {
     riffine_stream_destroy(stream);
-    if(opened) ma_decoder_uninit(&decoder);
+    riffine_decoder_close(decoder);
   }
 };
 namespace {
@@ -41,19 +40,11 @@ int riffine_preview_open(const char *path,int64_t start,int64_t end,double speed
     require(start>=0 && end>start && std::isfinite(speed) && speed>=.25 && speed<=2 &&
       std::isfinite(pitch) && pitch>=-12 && pitch<=12,"invalid preview range or parameters");
     auto s=std::make_unique<riffine_preview_source>();
-    auto config=ma_decoder_config_init(ma_format_f32,0,0);
-    config.encodingFormat=ma_encoding_format_wav;
-#ifdef _WIN32
-    auto result=ma_decoder_init_file_w(std::filesystem::u8path(path).c_str(),&config,&s->decoder);
-#else
-    auto result=ma_decoder_init_file(path,&config,&s->decoder);
-#endif
-    require(result==MA_SUCCESS,"cannot open preview WAV");s->opened=true;
-    ma_uint64 length=0;
-    require(ma_decoder_get_length_in_pcm_frames(&s->decoder,&length)==MA_SUCCESS && uint64_t(end)<=length,"preview range exceeds source");
-    s->channels=s->decoder.outputChannels;s->rate=s->decoder.outputSampleRate;
-    require(s->channels>=1 && s->channels<=2 && s->rate>=8000 && s->rate<=192000,"unsupported preview format");
-    require(ma_decoder_seek_to_pcm_frame(&s->decoder,uint64_t(start))==MA_SUCCESS,"cannot seek preview source");
+    require(riffine_decoder_open_file(path,&s->decoder,error,size)==0,"cannot open preview source");
+    riffine_decoder_info sourceInfo{};
+    require(riffine_decoder_info_get(s->decoder,&sourceInfo,error,size)==0 && uint64_t(end)<=sourceInfo.frames,"preview range exceeds source");
+    s->channels=sourceInfo.channels;s->rate=sourceInfo.sample_rate;
+    require(riffine_decoder_seek(s->decoder,uint64_t(start),error,size)==0,"cannot seek preview source");
     s->remaining=uint64_t(end-start);
     require(s->remaining<=(uint64_t(1)<<48),"preview range exceeds streaming frame counter limit");
     s->expected=uint64_t(std::llround(double(s->remaining)/speed));
@@ -90,9 +81,8 @@ int riffine_preview_read(riffine_preview_source *s,float *output,uint32_t capaci
         }
         s->offset+=count;s->emitted+=count;written+=count;
       } else if(s->remaining) {
-        auto count=ma_uint64(std::min<uint64_t>(512,s->remaining));ma_uint64 read=0;
-        auto result=ma_decoder_read_pcm_frames(&s->decoder,s->input.data(),count,&read);
-        require((result==MA_SUCCESS || result==MA_AT_END) && read==count,"truncated preview source");
+        auto count=uint32_t(std::min<uint64_t>(512,s->remaining));uint32_t read=0;
+        require(riffine_decoder_read(s->decoder,s->input.data(),count,&read,error,size)==0 && read==count,"truncated preview source");
         uint32_t consumed=0;
         dsp(riffine_stream_process(s->stream,s->input.data(),uint32_t(read),s->raw.data(),s->rawCapacity,&consumed,&s->pending,text,sizeof(text)),text);
         require(consumed==read,"preview DSP did not consume block");

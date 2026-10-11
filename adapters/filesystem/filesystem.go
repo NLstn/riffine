@@ -151,3 +151,13 @@ func WriteTone(path string, seconds, hz float64, sampleRate, channels int) error
 	}
 	return os.Link(f.Name(), path)
 }
+
+// LocalPath exposes a verified host-owned regular file only to filesystem-aware
+// adapters. Core code must use the borrowed resource instead of interpreting it.
+func LocalPath(r resource.Reader) (string, bool) {
+	local, ok := r.(reader)
+	if !ok {
+		return "", false
+	}
+	return local.File.Name(), true
+}

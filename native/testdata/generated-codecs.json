@@ -1,0 +1,19 @@
+{
+  "generator": "scripts/generate-codec-fixtures.py",
+  "pyav": "16.1.0",
+  "sourceFrames": 48000,
+  "sampleRate": 48000,
+  "channels": 2,
+  "files": [
+    {
+      "name": "generated-stereo.flac",
+      "bytes": 34960,
+      "sha256": "441b8b7cc1497310a05d02d4d53d7092d0a58d1f52ecab84d2721db89616059b"
+    },
+    {
+      "name": "generated-stereo.mp3",
+      "bytes": 25432,
+      "sha256": "af9664a4b493094e805124c22617b590275e080c55f8fd2ad559761f839d3f01"
+    }
+  ]
+}

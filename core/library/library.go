@@ -3,7 +3,6 @@ package library
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"io"
 	"path"
@@ -126,7 +125,7 @@ func (i *Index) Next(ctx context.Context, limit int) (Batch, error) {
 				track.Audio.DataBytes = 0
 				result.Track = &track
 				if old, ok := i.seen[info.SHA256]; ok {
-					if old.SampleRate != info.SampleRate || old.Channels != info.Channels || old.Frames != info.Frames || old.Bits != info.Bits {
+					if old.SampleRate != info.SampleRate || old.Channels != info.Channels || old.Frames != info.Frames || old.Bits != info.Bits || old.Encoding != info.Encoding {
 						return batch, errors.New("decoder returned inconsistent metadata for the same identity")
 					}
 					result.Status = "duplicate"
@@ -152,10 +151,7 @@ func (i *Index) inspect(ctx context.Context, handle string) (audio.Info, error) 
 	}
 	info, err := i.decoder.Inspect(ctx, r)
 	if err == nil {
-		hash, hashErr := hex.DecodeString(info.SHA256)
-		if hashErr != nil || len(hash) != 32 || info.SHA256 != strings.ToLower(info.SHA256) || info.Channels < 1 || info.Channels > 2 || info.SampleRate < 8000 || info.SampleRate > 192000 || info.Frames < 1 || info.Frames > 1<<48 || (info.Bits != 16 && info.Bits != 24 && info.Bits != 32) {
-			err = errors.New("decoder returned invalid canonical metadata")
-		}
+		err = audio.ValidateInfo(info)
 	}
 	closeErr := r.Close()
 	if err != nil {
