@@ -1,7 +1,7 @@
 // A processing-worker adapter to the shared C++ single-selection ABI. No project,
 // loop, presentation-clock or practice-counter policy lives in this adapter.
 export class Selection {
- constructor(module, channels, sampleRate, sourceFrames, speed, pitch) {
+ constructor(module, channels, sampleRate, sourceFrames, speed, pitch, edgeFadeFrames) {
   this.module = module;
   this.channels = channels;
   this.handle = 0;
@@ -22,6 +22,10 @@ export class Selection {
     BigInt(sourceFrames), speed, pitch, this.result, this.error, 512);
    this.check(status);
    this.handle = this.view().getUint32(this.result, true);
+   if (edgeFadeFrames !== undefined) {
+    if (!Number.isSafeInteger(edgeFadeFrames) || edgeFadeFrames < 0) throw new Error('Invalid scheduled edge fade.');
+    this.check(module._riffine_selection_set_edge_fade_frames(this.handle, BigInt(edgeFadeFrames), this.error, 512));
+   }
    this.input = allocate(512 * channels * 4);
    this.output = allocate(8192 * channels * 4);
    this.info();

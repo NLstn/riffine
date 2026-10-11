@@ -22,6 +22,6 @@ target_compile_options(riffine-browser-dsp PRIVATE -fexceptions)
 target_link_options(riffine-browser-dsp PRIVATE --no-entry -fexceptions
  "-sDISABLE_EXCEPTION_CATCHING=0" "-sMODULARIZE=1" "-sEXPORT_ES6=1"
  "-sENVIRONMENT=web,worker,node" "-sWASM_BIGINT=1"
- "-sEXPORTED_FUNCTIONS=[\"_malloc\",\"_free\",\"_riffine_selection_create\",\"_riffine_selection_info_get\",\"_riffine_selection_push\",\"_riffine_selection_read\",\"_riffine_selection_destroy\"]"
+ "-sEXPORTED_FUNCTIONS=[\"_malloc\",\"_free\",\"_riffine_selection_create\",\"_riffine_selection_set_edge_fade_frames\",\"_riffine_selection_info_get\",\"_riffine_selection_push\",\"_riffine_selection_read\",\"_riffine_selection_destroy\"]"
  "-sEXPORTED_RUNTIME_METHODS=[\"HEAPU8\",\"HEAPF32\"]"
  "-sINITIAL_MEMORY=33554432" "-sALLOW_MEMORY_GROWTH=0" "-sEXIT_RUNTIME=0")

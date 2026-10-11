@@ -20,6 +20,11 @@ typedef struct riffine_selection_info {
 int riffine_selection_create(uint32_t channels, uint32_t sample_rate,
  uint64_t source_frames, double speed, double semitones,
  riffine_selection **selection, char *error, size_t error_size);
+/* Optional scheduled edge gain: set only before source input/output processing.
+ * Zero disables fades; otherwise 0..ceil(output_frames/2). Invalid settings leave
+ * the current fade intact. Default create behavior remains independent 5 ms fades.
+ * No allocation; caller supplies the shared transport schedule's exact value. */
+int riffine_selection_set_edge_fade_frames(riffine_selection *, uint64_t frames, char *, size_t);
 int riffine_selection_info_get(const riffine_selection *, riffine_selection_info *, char *, size_t);
 /* Feed 1..512 whole frames only when read reports needs_input. Reject invalid
  * samples/ranges before processing. Never retains the host input buffer. */

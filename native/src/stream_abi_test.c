@@ -16,8 +16,9 @@ int main(void) {
   float input=.2f,output=0;
   uint32_t count=0,needs_input=0;
   if(riffine_selection_create(1,48000,1,2,0,&selection,error,sizeof(error))) return 1;
+  if(riffine_selection_set_edge_fade_frames(selection,1,error,sizeof(error))) return 1;
   int selection_result=riffine_selection_push(selection,&input,1,error,sizeof(error));
   selection_result|=riffine_selection_read(selection,&output,1,&count,&needs_input,error,sizeof(error));
   riffine_selection_destroy(selection);
-  return result || limits.max_input_frames!=64 || selection_result || count!=1 || needs_input;
+  return result || limits.max_input_frames!=64 || selection_result || count!=1 || needs_input || output!=0;
 }
