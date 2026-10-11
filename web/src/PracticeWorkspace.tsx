@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { BrowserPractice } from './practice';
+import { BrowserPractice, presentationSnapshot } from './practice';
 import type { EditCommand, LiveCommand, PracticeFacade, PracticeResponse, Snapshot, WaveWindow } from './practice';
 
 export default function PracticeWorkspace({ source, onClose, createFacade = () => new BrowserPractice() }: { source?: File; onClose: () => void; createFacade?: () => PracticeFacade }) {
@@ -31,7 +31,7 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
  const install = (response: PracticeResponse, syncForms = false) => {
   if (response.snapshot) {
    const current = response.snapshot;
-   setSnapshot(previous => previous && previous.sequence > current.sequence ? previous : current); if (syncForms) { setSpeed(String(current.project.settings.speed * 100)); setPitch(String(current.project.settings.pitch));
+   setSnapshot(previous => presentationSnapshot(previous, current, syncForms)); if (syncForms) { setSpeed(String(current.project.settings.speed * 100)); setPitch(String(current.project.settings.pitch));
    setStart(String(current.project.settings.loop.start)); setEnd(String(current.project.settings.loop.end)); setNotes(current.project.annotations.notes ?? ''); }
   }
   if (response.error) throw new Error(`${response.error.code}: ${response.error.message}`);
