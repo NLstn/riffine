@@ -238,8 +238,24 @@ func (s *decodedPCM) ReadFrames(ctx context.Context, dst []float32) (int, error)
 	if s.frame+int64(frames) == s.info.Frames {
 		if err = s.finish(false); err != nil {
 			s.failed = true
+			if ctx.Err() != nil {
+				return 0, ctx.Err()
+			}
+			if s.parent.Err() != nil {
+				return 0, s.parent.Err()
+			}
 			return 0, err
 		}
+	}
+	if ctx.Err() != nil {
+		s.failed = true
+		s.finish(true)
+		return 0, ctx.Err()
+	}
+	if s.parent.Err() != nil {
+		s.failed = true
+		s.finish(true)
+		return 0, s.parent.Err()
 	}
 	for j := 0; j < frames*s.info.Channels; j++ {
 		v := math.Float32frombits(binary.LittleEndian.Uint32(raw[j*4:]))

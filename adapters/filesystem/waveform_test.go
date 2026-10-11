@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -66,5 +67,30 @@ func TestPeakCachePublicationAndCancellation(t *testing.T) {
 	entries, err := os.ReadDir(c.Directory)
 	if err != nil || len(entries) != 1 {
 		t.Fatal("staging files leaked", entries, err)
+	}
+}
+
+func TestPeakCacheReplacementRetainsOpenReader(t *testing.T) {
+	ctx := context.Background()
+	c := PeakCache{Directory: t.TempDir()}
+	if err := c.Put(ctx, "key", []byte("old")); err != nil {
+		t.Fatal(err)
+	}
+	path, _ := c.path("key")
+	old, err := openPeakCache(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer old.Close()
+	if err = c.Put(ctx, "key", []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(old)
+	if err != nil || string(data) != "old" {
+		t.Fatal("open reader changed", string(data), err)
+	}
+	data, err = c.Get(ctx, "key", 3)
+	if err != nil || string(data) != "new" {
+		t.Fatal("new cache not published", string(data), err)
 	}
 }
