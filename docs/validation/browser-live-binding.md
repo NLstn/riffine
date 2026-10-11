@@ -33,7 +33,9 @@ Recovery rearms a fresh context from the user's action, waits for old-device
 detach before installing the new host, verifies/attaches the source again, and
 stops at the saved selection start. The UI displays the actual returned command
 sequence rather than assuming one sequence per button press. Close playback
-returns to selection preview. Workspace close and worker failure close the
+returns to selection preview. Reopening a source accepts its new sequence-zero
+snapshot; only replies within one session are filtered by sequence. An old
+session's higher sequence cannot block a newly verified source. Workspace close and worker failure close the
 context once. If context close rejects, failure publication waits for a
 suspension fence; rejection of both fences never publishes false quiescence.
 
