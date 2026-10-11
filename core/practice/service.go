@@ -13,6 +13,7 @@ import (
 	"github.com/NLstn/riffine/core/engine"
 	"github.com/NLstn/riffine/core/project"
 	"github.com/NLstn/riffine/core/resource"
+	"github.com/NLstn/riffine/core/waveform"
 )
 
 const APIVersion = 1
@@ -423,5 +424,26 @@ func (s *Session) Save(ctx context.Context) (resource.UpdateResult, error) {
 		return result, failure(HostFailure, errors.New("host returned an invalid committed revision; reopen the document"))
 	}
 	s.revision = result.Revision
+	return result, nil
+}
+
+// OpenWaveform verifies the source once and returns an immutable pyramid. Hosts
+// keep that handle for window/zoom queries and reopen after a resource change.
+func (s *Session) OpenWaveform(ctx context.Context, cache waveform.Cache, progress func(waveform.Progress)) (waveform.Result, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	decoder, ok := s.service.Decoder.(audio.PCMDecoder)
+	if !ok {
+		return waveform.Result{}, failure(UnsupportedCapability, errors.New("streaming waveform decoding is unavailable"))
+	}
+	r, err := s.openVerified(ctx, s.source)
+	if err != nil {
+		return waveform.Result{}, err
+	}
+	defer r.Close()
+	result, err := waveform.OpenWithInfo(ctx, r, decoder, s.p.Track.Audio, cache, progress)
+	if err != nil {
+		return result, failure(HostFailure, err)
+	}
 	return result, nil
 }
