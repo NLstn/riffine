@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { chooseFolder, formatDuration, formatSize, indexFiles } from './library';
 import type { MusicTrack } from './library';
+import PracticeWorkspace from './PracticeWorkspace';
 
 type Phase = 'idle' | 'indexing' | 'ready';
 
@@ -9,6 +10,9 @@ function App() {
   const folderInput = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const playbackUrl = useRef<string | undefined>(undefined);
+  const [practiceSource, setPracticeSource] = useState<File>();
+  const [practiceOpen, setPracticeOpen] = useState(false);
+  const [practiceKey, setPracticeKey] = useState(0);
   const [tracks, setTracks] = useState<MusicTrack[]>([]);
   const [currentTrack, setCurrentTrack] = useState<MusicTrack | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -213,6 +217,9 @@ function App() {
         </section>
         {notice && phase === 'idle' && <div className="notice page-notice" role="status">{notice}</div>}
 
+        <button type="button" className="primary-button" onClick={() => { stopPlayback(); setPracticeSource(undefined); setPracticeKey(value => value + 1); setPracticeOpen(true); }}>Open practice workspace</button>
+        {practiceOpen && <PracticeWorkspace key={practiceKey} source={practiceSource} onClose={() => setPracticeOpen(false)} />}
+
         {phase === 'idle' ? (
           <section className="welcome-card">
             <div className="welcome-art" aria-hidden="true">
@@ -272,7 +279,7 @@ function App() {
                           <button
                             className={`track-play-button${currentTrack?.id === track.id && isPlaying ? ' is-playing' : ''}`}
                             type="button"
-                            onClick={() => playTrack(track)}
+                            disabled={practiceOpen} onClick={() => playTrack(track)}
                             aria-label={`${currentTrack?.id === track.id && isPlaying ? 'Pause' : 'Play'} ${track.title}`}
                             title={currentTrack?.id === track.id && isPlaying ? 'Pause track' : 'Play track'}
                           >{currentTrack?.id === track.id && isPlaying ? 'Ⅱ' : '▶'}</button>
@@ -284,7 +291,7 @@ function App() {
                               ? <img className="cover-art" src={track.artworkUrl} alt="" />
                               : <div className="cover-placeholder"><span>♫</span></div>}
                             <div className="track-text">
-                              <button className="track-title-button" type="button" onClick={() => playTrack(track)} title={`Play ${track.title}`}>{track.title}</button>
+                              <button className="track-title-button" type="button" disabled={practiceOpen} onClick={() => playTrack(track)} title={`Play ${track.title}`}>{track.title}</button>
                               <span title={track.artist}>{track.artist}</span>
                             </div>
                           </div>
@@ -292,7 +299,7 @@ function App() {
                         <td><div className="album-cell"><strong title={track.album}>{track.album}</strong><span>{[track.genre, track.year].filter(Boolean).join(' · ') || '—'}</span></div></td>
                         <td><span className="format-badge">{track.format}</span><span className="file-size">{formatSize(track.size)}</span></td>
                         <td className="duration-cell">{formatDuration(track.duration)}</td>
-                        <td className="more-cell" title={track.tagError ? 'Tags could not be read; showing filename.' : track.relativePath}>•••</td>
+                        <td className="more-cell"><button type="button" onClick={() => { stopPlayback(); setPracticeSource(track.file); setPracticeKey(value => value + 1); setPracticeOpen(true); }} aria-label={`Practice ${track.title}`}>Practice</button></td>
                       </tr>
                     ))}
                     {phase === 'ready' && visibleTracks.length === 0 && (

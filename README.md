@@ -155,3 +155,13 @@ See [native codec validation](docs/validation/native-codecs.md) for generated
 fixtures, supported operations and compressed seek limits.
 
 See [precise waveform detail](docs/validation/waveform-detail.md).
+
+### Browser practice workspace
+
+Build the shared core with `sh scripts/build-browser-practice.sh`, then run
+`npm --prefix web ci` and `npm --prefix web run dev`. Open the localhost URL,
+choose **Open practice workspace → Try generated demo**, and edit a source-time
+phrase, speed/pitch, named loops, notes or markers. Download/reopen projects to
+keep edits. The browser adapter currently supports WAV PCM editing/waveforms;
+practice audio playback is explicitly unavailable. [Validation and remaining
+host work](docs/validation/browser-practice.md).
