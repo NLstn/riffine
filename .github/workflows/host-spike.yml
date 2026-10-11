@@ -72,7 +72,13 @@ jobs:
         run: |
           test -e /dev/kvm
           sudo chmod a+rw /dev/kvm
+          export ANDROID_USER_HOME="$RUNNER_TEMP/riffine-android-user"
+          export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
           printf 'no\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --name riffine-ci --package "system-images;android-35;google_apis;x86_64" --force
+          "$ANDROID_HOME/emulator/emulator" -list-avds | tee build/host-spike/android-amd64/avds.txt
+          test -f "$ANDROID_AVD_HOME/riffine-ci.ini"
           trap '"$ANDROID_HOME/platform-tools/adb" -s emulator-5554 emu kill >/dev/null 2>&1 || true' EXIT
           "$ANDROID_HOME/emulator/emulator" -avd riffine-ci -port 5554 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on >build/host-spike/android-amd64/emulator.log 2>&1 &
           python3 scripts/check-android-spike.py
