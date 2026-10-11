@@ -2,9 +2,10 @@
 
 The next live-device dependency connects shared-core schedules to bounded source
 reads, the production selection WASM, AudioWorklet output and device-position
-acknowledgements. These adapter modules are tested separately from the existing
-one-pass workspace preview. They are not yet installed as the Go LiveDevice
-factory, and `liveTransport` remains false in the workspace.
+acknowledgements. These adapter modules have focused tests separate from one-pass preview. The
+[following session-binding slice](browser-live-binding.md) installs the Go
+LiveDevice factory and workspace controls; live capability becomes true only
+after a successful attachment.
 
 ## Worker ownership and routing
 
@@ -62,7 +63,7 @@ suspend ordering, fresh reset buffers, exactly one context close, failure
 publication after the close fence and stalled device-position teardown. Existing
 preview, boundary and facade lifecycle tests remain required.
 
-The Go verified-reader LiveDevice factory, main/worker control bridge, workspace
-live commands/polling, recovery context rearming and actual browser repeated-loop
-traces remain the next integration work. This dependency slice does not attest
+The [session-binding validation](browser-live-binding.md) covers the subsequent
+Go factory, main/worker bridge, workspace controls, recovery context rearming and
+actual browser repeated-loop trace. This dependency slice does not attest
 physical presentation accuracy, independent device latency or listening quality.

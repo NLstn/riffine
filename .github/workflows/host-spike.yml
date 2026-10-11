@@ -120,6 +120,7 @@ jobs:
           sh scripts/build-browser-practice.sh
           go run ./cmd/riffine tone --out build/browser-conformance.wav --seconds 1
           node scripts/check-browser-preview.mjs > build/browser-dsp/preview.json
+          node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-binding.json
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -130,4 +131,5 @@ jobs:
             build/browser-dsp/metrics.json
             build/browser-dsp/preview.json
             build/browser-dsp/schedules.json
+            build/browser-dsp/live-binding.json
           if-no-files-found: warn

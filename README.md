@@ -158,6 +158,11 @@ See [precise waveform detail](docs/validation/waveform-detail.md).
 
 ### Browser practice workspace
 
+The browser practice workspace also supports live Play/Pause, Stop, Restart and
+Seek for supported WAV sources. Position and completed A/B loops follow the
+shared core's device acknowledgements. Use **Close playback** to return to a
+one-pass preview. See [live session binding and its validation limits](docs/validation/browser-live-binding.md).
+
 Build the shared core with `sh scripts/build-browser-practice.sh`, then run
 `npm --prefix web ci` and `npm --prefix web run dev`. Open the localhost URL,
 choose **Open practice workspace → Try generated demo**, and edit a source-time

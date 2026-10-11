@@ -79,7 +79,11 @@ func (s *Session) AttachTransport(ctx context.Context) error {
 		if device != nil {
 			cause = errors.Join(cause, device.Close())
 		}
-		return failure(HostFailure, errors.Join(cause, reader.Close()))
+		cause = errors.Join(cause, reader.Close())
+		if errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
+			return failure(Cancelled, cause)
+		}
+		return failure(HostFailure, cause)
 	}
 	if err != nil {
 		return cleanup(err)
