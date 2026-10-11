@@ -14,7 +14,7 @@ speed, pitch and exact loop seconds. A legacy range containing at least one fram
 becomes `region-v1-loop` with the named loop `loop-v1`, deterministically, whether
 or not looping was enabled. A valid disabled sub-frame range remains in settings
 without becoming a region. Migration is in memory; reading never rewrites the
-original. Save-as emits v2 into a new file, and older applications must reject it.
+original. Save-as emits the current project version into a new file, and older applications must reject newer formats. Project v3 later adds practice-plan definitions.
 Unknown future versions and fields fail explicitly.
 
 `set_annotations` replaces the annotation collection atomically under the session

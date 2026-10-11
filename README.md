@@ -136,7 +136,7 @@ See [the implementation plan](docs/implementation-plan.md),
 Portable session documents now support source-time regions, markers, notes,
 named loops and bookmarks. Version-1 documents migrate explicitly on read;
 `riffine annotate --project song.json --out annotated.json --annotations notes.json`
-saves a new v2 document. [Examples and migration details](docs/validation/portable-sessions.md).
+saves a new v3 document. [Examples and migration details](docs/validation/portable-sessions.md).
 
 `riffine save --project song.json --speed 0.6 --pitch 3` now saves to the same
 project with revision protection and a readable previous-revision recovery copy.

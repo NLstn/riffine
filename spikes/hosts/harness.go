@@ -51,6 +51,7 @@ type Step struct {
 	Error    practice.ErrorCode `json:"error,omitempty"`
 }
 type Report struct {
+	Ladder               LadderReport                `json:"ladder"`
 	Transport            TransportReport             `json:"transport"`
 	AnnotationsRoundTrip bool                        `json:"annotationsRoundTrip"`
 	Version              int                         `json:"version"`
@@ -209,6 +210,10 @@ func execute(input string) (r Report, err error) {
 		return r, errors.New("acknowledgement/resource contract differs")
 	}
 	r.Transport, err = transportConformance(ctx, r.Render, session.Snapshot().Project.Track.Audio.Frames, session.Snapshot().Project.Track.Audio.SampleRate)
+	if err != nil {
+		return r, err
+	}
+	r.Ladder, err = ladderConformance(ctx, r.Render, session.Snapshot().Project.Track.Audio.Frames, session.Snapshot().Project.Track.Audio.SampleRate)
 	return r, err
 }
 

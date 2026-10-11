@@ -14,6 +14,7 @@ import (
 
 	"github.com/NLstn/riffine/core/audio"
 	"github.com/NLstn/riffine/core/engine"
+	"github.com/NLstn/riffine/core/ladder"
 	"github.com/NLstn/riffine/core/project"
 	"github.com/NLstn/riffine/core/resource"
 )
@@ -509,4 +510,37 @@ func TestSessionSaveRevisionsAndRecovery(t *testing.T) {
 	errorCode(t, e, Cancelled)
 	_, e = imported.Save(ctx)
 	errorCode(t, e, UnsupportedCapability)
+}
+
+func TestPracticePlanSessionRoundTrip(t *testing.T) {
+	s, _, _ := newSession(t)
+	ctx := context.Background()
+	a := project.Annotations{Regions: []project.Region{{ID: "phrase", Start: .1, End: .8}}}
+	_, e := s.Dispatch(ctx, Command{Version: 1, Sequence: 1, Type: "set_annotations", Annotations: &a})
+	errorCode(t, e, "")
+	plans := []project.PracticePlan{{ID: "ladder", Label: "60–100", RegionID: "phrase", Ladder: ladder.Definition{StartSpeed: .6, TargetSpeed: 1, IncrementPoints: 5, LoopsPerStep: 4, EndBehavior: "stop"}}}
+	snapshot, e := s.Dispatch(ctx, Command{Version: 1, Sequence: 2, Type: "set_practice_plans", PracticePlans: &plans})
+	errorCode(t, e, "")
+	plans[0].Label = "caller mutation"
+	snapshot.Project.PracticePlans[0].Label = "snapshot mutation"
+	if s.Snapshot().Project.PracticePlans[0].Label != "60–100" {
+		t.Fatal("plan memory escaped")
+	}
+	if e = s.SaveAs(ctx, "opaque:plan"); e != nil {
+		t.Fatal(e)
+	}
+	reopened, e := s.service.Open(ctx, "opaque:plan")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if !reflect.DeepEqual(s.Snapshot().Project, reopened.Snapshot().Project) {
+		t.Fatal("plan did not round trip")
+	}
+	before := reopened.Snapshot()
+	empty := project.Annotations{}
+	_, e = reopened.Dispatch(ctx, Command{Version: 1, Sequence: 1, Type: "set_annotations", Annotations: &empty})
+	errorCode(t, e, InvalidCommand)
+	if !reflect.DeepEqual(before, reopened.Snapshot()) {
+		t.Fatal("region removal left dangling plan")
+	}
 }

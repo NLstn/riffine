@@ -27,6 +27,8 @@ const Help = `Riffine — local guitar practice core (working name)
   riffine loop     --project slow.riffine.json --out loop.riffine.json --start 1 --end 3 [--enabled=true]
   riffine relink   --project song.riffine.json --audio relocated.wav --out relinked.riffine.json
   riffine save     --project song.riffine.json [--speed 0.75 --pitch -2]
+  riffine plans    --project annotated.json --out planned.json --plans ladder.json
+  riffine plan     --project planned.json --id ladder
   riffine annotate --project song.riffine.json --out annotated.riffine.json --annotations notes.json
   riffine waveform --project song.riffine.json [--bins 1000 --out song.peaks.json]
   riffine render   --project song.riffine.json --out practice.wav
@@ -49,7 +51,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 	command := args[0]
 	f := flag.NewFlagSet(command, flag.ContinueOnError)
 	f.SetOutput(errOut)
-	var source, dest, proj, annotationFile string
+	var source, dest, proj, annotationFile, plansFile, planID string
 	var verify, silent bool
 	var speed, pitch, start, end, seconds, hz float64
 	var enabled bool
@@ -77,6 +79,13 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 		f.Float64Var(&start, "start", 0, "source seconds")
 		f.Float64Var(&end, "end", 0, "source seconds")
 		f.BoolVar(&enabled, "enabled", true, "repeat selected region")
+	case "plans":
+		f.StringVar(&proj, "project", "", "existing annotated project")
+		f.StringVar(&dest, "out", "", "new project with practice plans")
+		f.StringVar(&plansFile, "plans", "", "practice plan definitions JSON file")
+	case "plan":
+		f.StringVar(&proj, "project", "", "project with a saved practice plan")
+		f.StringVar(&planID, "id", "", "practice plan ID to inspect")
 	case "annotate":
 		f.StringVar(&proj, "project", "", "existing project")
 		f.StringVar(&dest, "out", "", "new annotated project")
@@ -116,7 +125,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 		return errors.New("--project is required")
 	}
 	switch command {
-	case "tone", "import", "relink", "set", "loop", "render", "annotate":
+	case "tone", "import", "relink", "set", "loop", "render", "annotate", "plans":
 		if dest == "" {
 			return errors.New("--out is required")
 		}
@@ -170,6 +179,28 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 			}
 		}
 		return writeJSON(p)
+	case "plan":
+		if planID == "" {
+			return errors.New("--id is required")
+		}
+		definition, compiled, e := p.CompilePracticePlan(planID)
+		if e != nil {
+			return e
+		}
+		return writeJSON(map[string]any{"mode": "schedule-preview", "plan": definition, "steps": compiled.Describe(), "totalLoops": compiled.TotalLoops()})
+	case "plans":
+		if plansFile == "" {
+			return errors.New("--plans is required")
+		}
+		data, e := service.Store.Read(ctx, plansFile, project.MaxDocumentBytes)
+		if e != nil {
+			return e
+		}
+		plans, e := project.DecodePracticePlans(bytes.NewReader(data))
+		if e != nil {
+			return e
+		}
+		change = &practice.Command{Version: practice.APIVersion, Sequence: 1, Type: "set_practice_plans", PracticePlans: &plans}
 	case "annotate":
 		if annotationFile == "" {
 			return errors.New("--annotations is required")

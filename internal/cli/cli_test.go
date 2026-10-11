@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/NLstn/riffine/core/engine"
+	"github.com/NLstn/riffine/core/ladder"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/NLstn/riffine/adapters/filesystem"
 	"github.com/NLstn/riffine/core/audio"
 	"github.com/NLstn/riffine/core/practice"
+	"github.com/NLstn/riffine/core/project"
 	"github.com/NLstn/riffine/core/resource"
 )
 
@@ -123,7 +125,7 @@ func TestAnnotatedProjectWorkflow(t *testing.T) {
 		t.Fatal(e)
 	}
 	p := session.Snapshot().Project
-	if p.Version != 2 || p.Annotations.Notes != "Slow pickup" || len(p.Annotations.Regions) != 1 || p.Annotations.Loops[0].RegionID != "intro" || p.Annotations.Bookmarks[0].Position != .3 {
+	if p.Version != project.Version || p.Annotations.Notes != "Slow pickup" || len(p.Annotations.Regions) != 1 || p.Annotations.Loops[0].RegionID != "intro" || p.Annotations.Bookmarks[0].Position != .3 {
 		t.Fatal(p)
 	}
 	after, _ := os.ReadFile(wav)
@@ -190,5 +192,44 @@ func TestRevisionProtectedSaveCLI(t *testing.T) {
 	var b bytes.Buffer
 	if e = Run(context.Background(), []string{"save", "--project", document, "--out", source}, &b, &b); e == nil {
 		t.Fatal("save accepted conflicting output path")
+	}
+}
+
+func TestSavedLadderSchedulePreviewCLI(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "tone.wav")
+	document := filepath.Join(dir, "project.json")
+	annotated := filepath.Join(dir, "annotated.json")
+	planned := filepath.Join(dir, "planned.json")
+	notes := filepath.Join(dir, "notes.json")
+	plansFile := filepath.Join(dir, "ladder.json")
+	run := func(args ...string) []byte {
+		t.Helper()
+		var b bytes.Buffer
+		if e := Run(context.Background(), args, &b, &b); e != nil {
+			t.Fatal(args, e, b.String())
+		}
+		return b.Bytes()
+	}
+	run("tone", "--out", source, "--seconds", "1")
+	run("import", "--audio", source, "--out", document)
+	if e := os.WriteFile(notes, []byte(`{"regions":[{"id":"intro","label":"Intro","start":0.1,"end":0.8}]}`), 0600); e != nil {
+		t.Fatal(e)
+	}
+	if e := os.WriteFile(plansFile, []byte(`[{"id":"ladder","label":"60 to 100","regionId":"intro","ladder":{"startSpeed":0.6,"targetSpeed":1,"incrementPoints":5,"loopsPerStep":4,"endBehavior":"stop"}}]`), 0600); e != nil {
+		t.Fatal(e)
+	}
+	run("annotate", "--project", document, "--out", annotated, "--annotations", notes)
+	run("plans", "--project", annotated, "--out", planned, "--plans", plansFile)
+	var preview struct {
+		Mode       string
+		Steps      []ladder.Step
+		TotalLoops uint64
+	}
+	if e := json.Unmarshal(run("plan", "--project", planned, "--id", "ladder"), &preview); e != nil {
+		t.Fatal(e)
+	}
+	if preview.Mode != "schedule-preview" || preview.TotalLoops != 36 || len(preview.Steps) != 9 || preview.Steps[0].FirstLoop != 1 || preview.Steps[0].LastLoop != 4 || preview.Steps[1].Speed != .65 || preview.Steps[8].FirstLoop != 33 || preview.Steps[8].LastLoop != 36 || preview.Steps[8].Speed != 1 {
+		t.Fatal(preview)
 	}
 }

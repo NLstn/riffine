@@ -32,7 +32,7 @@ is an opaque host string; `Resolve`/`Reference` translate saved locators relativ
 a document. Handles must not substitute for content identity across hosts.
 SHA-256 covers original bytes including metadata; re-encoding or retagging changes
 identity. Decoder cursors (`DataOffset`/`DataBytes`) are never saved session metadata.
-Project-v2 metadata still supports only integer PCM WAV; #17 adds codecs.
+Project-v3 metadata still supports only integer PCM WAV; #17 adds codecs.
 
 `Store.Read` rejects documents over its requested limit before materializing them.
 The core independently rejects project JSON over 1 MiB. `Store.Create` must publish
