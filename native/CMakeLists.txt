@@ -18,7 +18,7 @@ FetchContent_Declare(miniaudio
   GIT_SUBMODULES ""
   SOURCE_SUBDIR riffine-no-upstream-targets)
 FetchContent_MakeAvailable(signalsmith-linear signalsmith-stretch miniaudio)
-add_library(riffine-dsp STATIC src/audio.cpp src/decode.cpp src/stream.cpp src/preview_source.cpp src/preview.cpp)
+add_library(riffine-dsp STATIC src/audio.cpp src/decode.cpp src/stream.cpp src/selection.cpp src/preview_source.cpp src/preview.cpp)
 target_include_directories(riffine-dsp PUBLIC include PRIVATE ${miniaudio_SOURCE_DIR})
 find_package(Threads REQUIRED)
 target_link_libraries(riffine-dsp PRIVATE signalsmith-stretch Threads::Threads)
@@ -33,6 +33,9 @@ install(FILES ${signalsmith-linear_SOURCE_DIR}/LICENSE.txt DESTINATION licenses 
 install(FILES ${miniaudio_SOURCE_DIR}/LICENSE DESTINATION licenses RENAME miniaudio.txt)
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(riffine-selection-test src/selection_test.cpp)
+  target_link_libraries(riffine-selection-test PRIVATE riffine-dsp)
+  add_test(NAME portable-selection-processing COMMAND riffine-selection-test)
   add_executable(riffine-decode-test src/decode_test.cpp)
   target_link_libraries(riffine-decode-test PRIVATE riffine-dsp)
   target_compile_definitions(riffine-decode-test PRIVATE RIFFINE_DECODE_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/testdata")

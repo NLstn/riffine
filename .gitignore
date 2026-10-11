@@ -11,3 +11,8 @@
 
 /web/public/practice/core.wasm
 /web/public/practice/wasm_exec.js
+
+# Generated production browser processing module
+web/public/practice/dsp.mjs
+web/public/practice/riffine-browser-dsp.wasm
+web/public/practice/licenses/

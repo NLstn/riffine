@@ -28,3 +28,9 @@ if(EMSCRIPTEN)
     "-sINITIAL_MEMORY=33554432" "-sALLOW_MEMORY_GROWTH=0"
     "-sEXIT_RUNTIME=0" "-sEXPORTED_RUNTIME_METHODS=[\"HEAPU8\"]")
 endif()
+
+if(NOT EMSCRIPTEN)
+ add_executable(selection-probe ../../native/src/selection_test.cpp ../../native/src/selection.cpp ../../native/src/stream.cpp)
+ target_include_directories(selection-probe PRIVATE ../../native/include)
+ target_link_libraries(selection-probe PRIVATE signalsmith-stretch)
+endif()

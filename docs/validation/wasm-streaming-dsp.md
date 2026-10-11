@@ -61,3 +61,14 @@ allocates on its worker, never on a real-time audio callback. Browser capabiliti
 and fallback paths still need production adapters under #26. Physical device
 and mobile DSP evidence remain part of #13/#27; no roadmap issue is closed by
 this probe alone. Existing dependency revisions and third-party notices apply.
+
+
+## Browser selection worker
+
+The production browser processing build now exports a source-independent
+`riffine_selection` cursor from the same C++ sources used by native preview.
+`native/src/preview_source.cpp` retains file/decoder ownership and feeds that
+cursor; latency trim, rounded duration, optional final zero frame and independent
+5 ms edge fades have one processing implementation. See
+[browser selection processing](browser-selection-processing.md). This module
+still requires an output adapter; producing PCM does not acknowledge playback.
