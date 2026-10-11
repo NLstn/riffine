@@ -19,17 +19,20 @@ globalThis.FileReaderSync = class {
 };
 globalThis.postMessage = data => parentPort.postMessage({ ...data, reads, maxRead });
 await import(pathToFileURL(workerData.loader));
-if (workerData.preview) {
+let liveReceive;
+if (workerData.preview || workerData.live) {
  globalThis.self = globalThis;
  const preview = await import('../web/public/practice/preview-worker.mjs');
  await preview.ready;
  globalThis.riffinePreviewRun = preview.run;
  globalThis.riffinePreviewEnabled = true;
+ if (workerData.live) { const live = await import('../web/public/practice/live-worker.mjs'); liveReceive = live.receive; globalThis.riffineLiveOpen = live.open; globalThis.riffineLiveEnabled = true; }
 }
 const go = new globalThis.Go();
 const { instance } = await WebAssembly.instantiate(await readFile(workerData.wasm), go.importObject);
 void go.run(instance).catch(error => { throw error; });
 parentPort.on('message', data => {
+ if (liveReceive?.(data)) return;
  if (data.request?.type === 'preview') globalThis.riffinePreviewQueue = data.queue;
  if (data.type === 'cancel') { globalThis.riffinePracticeCancel(); return; }
  let file;

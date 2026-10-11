@@ -63,6 +63,9 @@ func main() {
 				if browser.PreviewAvailable() {
 					service.SourcePreviewer = browser.Previewer{}
 				}
+				if browser.LiveAvailable() {
+					service.LiveDevice = browser.LiveFactory{}
+				}
 				current = binding.New(service)
 			}
 			if current == nil {

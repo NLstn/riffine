@@ -135,3 +135,62 @@ const controlledRequest = worker.sent.find(message => message.request?.type === 
 worker.emit({ type: 'result', id: controlledRequest.id, response: { version: 1, error: {code: 'cancelled', message: 'context canceled'} } });
 assert.equal((await controlled).error.code, 'cancelled'); assert.equal(controlledContext.closeCalls, 1); client.dispose();
 console.log(JSON.stringify({ previewControlsReady: true, facadePauseResume: true, cancelPauseRetainsReaderFence: true }));
+
+// Live setup retains synchronous user activation. The actual host controller
+// owns context close; a worker's attach/detach replies remain reader fences.
+const { LiveOutputHost } = await import('../web/public/practice/live-output-host.mjs');
+const liveSnapshot = {version:1,sequence:2,project:snapshot.project,capabilities:{streamPreview:true,liveTransport:false}};
+client = new BrowserPractice({loadLive: () => new Promise(() => {})});
+worker = MockWorker.instances.at(-1); worker.emit({type:'ready'});
+const cancelledLiveSetup = client.transport(liveSnapshot,{type:'play'});
+const cancelledLiveContext = MockAudioContext.instances.at(-1);
+assert.equal(cancelledLiveContext.resumeCalls,1);
+client.cancel(); await assert.rejects(cancelledLiveSetup,/cancelled/);
+assert.equal(cancelledLiveContext.closeCalls,1);
+assert(!worker.sent.some(message=>message.request?.type==='attach_transport'));
+client.dispose();
+
+client = new BrowserPractice({loadLive: async () => ({LiveOutputHost})});
+worker = MockWorker.instances.at(-1); worker.emit({type:'ready'});
+let hostID=0, requestsSeen=new Set();
+async function hostRequest(method,args={}) {
+ const id=++hostID; worker.emit({type:'live_call',id,method,args});
+ for(let attempt=0;attempt<100;attempt++) {
+  const response=worker.sent.find(message=>message.type==='live_result'&&message.id===id);
+  if(response){assert.equal(response.error,undefined);return response.result;}
+  await tick();
+ }
+ throw new Error('Host response missing: '+method);
+}
+async function nextRequest(type) {
+ for(let attempt=0;attempt<100;attempt++) {
+  const request=worker.sent.find(message=>message.request?.type===type&&!requestsSeen.has(message.id));
+  if(request){requestsSeen.add(request.id);return request;}
+  await tick();
+ }
+ throw new Error('Core request missing: '+type);
+}
+function coreReply(request,value) {worker.emit({type:'result',id:request.id,response:{version:1,snapshot:value}});}
+const livePlay=client.transport(liveSnapshot,{type:'play'});
+const originalLiveContext=MockAudioContext.instances.at(-1);
+assert.equal(originalLiveContext.resumeCalls,1);
+let attachRequest=await nextRequest('attach_transport');
+await hostRequest('open',{sampleRate:48000,channels:1});await hostRequest('reset');
+const attachedSnapshot={...liveSnapshot,sequence:3,capabilities:{...liveSnapshot.capabilities,liveTransport:true}};
+coreReply(attachRequest,attachedSnapshot);
+let playRequest=await nextRequest('command');assert.equal(playRequest.request.command.sequence,4);
+const playingSnapshot={...attachedSnapshot,sequence:4};coreReply(playRequest,playingSnapshot);await livePlay;
+
+const recovering=client.transport(playingSnapshot,{type:'recover'});
+const recoveredContext=MockAudioContext.instances.at(-1);
+assert.notEqual(recoveredContext,originalLiveContext);assert.equal(recoveredContext.resumeCalls,1);
+const detachRequest=await nextRequest('detach_transport');await hostRequest('close');
+assert.equal(originalLiveContext.closeCalls,1);assert.equal(recoveredContext.closeCalls,0);
+coreReply(detachRequest,{...liveSnapshot,sequence:5});
+attachRequest=await nextRequest('attach_transport');await hostRequest('open',{sampleRate:48000,channels:1});await hostRequest('reset');
+coreReply(attachRequest,{...attachedSnapshot,sequence:6});
+const stopRequest=await nextRequest('command');assert.equal(stopRequest.request.command.type,'stop');assert.equal(stopRequest.request.command.sequence,7);
+coreReply(stopRequest,{...attachedSnapshot,sequence:7});await recovering;
+client.dispose();client.dispose();await tick();
+assert.equal(originalLiveContext.closeCalls,1);assert.equal(recoveredContext.closeCalls,1);
+console.log(JSON.stringify({liveGestureBeforeAwait:true,cancelLiveSetupClosesOnce:true,recoveryFencesOldHostBeforeInstallingNewHost:true,liveDisposeClosesContextExactlyOnce:true}));

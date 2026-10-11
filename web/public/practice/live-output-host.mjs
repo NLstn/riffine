@@ -84,7 +84,18 @@ export class LiveOutputHost {
   await this.closing;
  }
  closeContext() {
-  if (!this.closingContext) this.closingContext = this.context.state === 'closed' ? Promise.resolve() : Promise.resolve().then(() => this.context.close());
+  if (!this.closingContext) this.closingContext = (async () => {
+   if (this.context.state === 'closed') return;
+   try { await this.context.close(); }
+   catch (closeError) {
+    if (this.context.state === 'closed') return;
+    // A rejected close is not a quiescence acknowledgement. The callback gate
+    // is already closed; require the context's suspension fence before exposing
+    // failure to the worker or releasing its borrowed-source callbacks.
+    try { await this.context.suspend(); }
+    catch (suspendError) { throw new AggregateError([closeError, suspendError], 'Live context could not quiesce.'); }
+   }
+  })();
   return this.closingContext;
  }
  async close() {

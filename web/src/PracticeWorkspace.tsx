@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { BrowserPractice } from './practice';
-import type { EditCommand, PracticeFacade, PracticeResponse, Snapshot, WaveWindow } from './practice';
+import type { EditCommand, LiveCommand, PracticeFacade, PracticeResponse, Snapshot, WaveWindow } from './practice';
 
 export default function PracticeWorkspace({ source, onClose, createFacade = () => new BrowserPractice() }: { source?: File; onClose: () => void; createFacade?: () => PracticeFacade }) {
  const facade = useRef<PracticeFacade | null>(null);
@@ -22,6 +22,7 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
  const [end, setEnd] = useState('0');
  const [speed, setSpeed] = useState('100');
  const [pitch, setPitch] = useState('0');
+ const [seekSeconds, setSeekSeconds] = useState('0');
  const [label, setLabel] = useState('Phrase');
  const [notes, setNotes] = useState('');
  const [phraseNotes, setPhraseNotes] = useState('');
@@ -30,7 +31,7 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
  const install = (response: PracticeResponse, syncForms = false) => {
   if (response.snapshot) {
    const current = response.snapshot;
-   setSnapshot(current); if (syncForms) { setSpeed(String(current.project.settings.speed * 100)); setPitch(String(current.project.settings.pitch));
+   setSnapshot(previous => previous && previous.sequence > current.sequence ? previous : current); if (syncForms) { setSpeed(String(current.project.settings.speed * 100)); setPitch(String(current.project.settings.pitch));
    setStart(String(current.project.settings.loop.start)); setEnd(String(current.project.settings.loop.end)); setNotes(current.project.annotations.notes ?? ''); }
   }
   if (response.error) throw new Error(`${response.error.code}: ${response.error.message}`);
@@ -55,6 +56,39 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
   // One worker per mounted workspace. Injected facades are fixed for its lifetime.
   // eslint-disable-next-line react-hooks/exhaustive-deps
  }, []);
+ // The timer only requests shared-core snapshots. Device acknowledgements own
+ // position and completed-loop counts; React never advances either value.
+ useEffect(() => {
+  const client = facade.current;
+  if (busy || !snapshot?.capabilities.liveTransport || snapshot.transport?.state === 'error' || !client?.pollTransport) return;
+  let active = true;
+  let timer: ReturnType<typeof setTimeout>;
+  const poll = async () => {
+   try {
+    const response = await client.pollTransport!();
+    if (!active) return;
+    if (response.error) {
+     if (response.snapshot) setSnapshot(response.snapshot);
+     setError('Playback was interrupted. Recover playback to try again.'); setStatus('Playback stopped.'); return;
+    }
+    install(response);
+   } catch { if (active) { setError('Playback was interrupted. Recover playback to try again.'); setStatus('Playback stopped.'); } return; }
+   if (active) timer = setTimeout(() => void poll(), 50);
+  };
+  void poll();
+  return () => { active = false; clearTimeout(timer); };
+  // Polling does not edit the project or consume a command sequence.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+ }, [busy, snapshot?.capabilities.liveTransport, snapshot?.transport?.state]);
+ const transport = (command: LiveCommand) => run(async () => {
+  if (!facade.current?.transport || !snapshot) return;
+  install(await facade.current.transport(snapshot, command));
+  setStatus(command.type === 'recover' ? 'Playback recovered. Press Play to start.' : 'Playback updated.');
+ });
+ const releasePlayback = () => run(async () => {
+  if (!facade.current?.detachTransport) return;
+  install(await facade.current.detachTransport()); setStatus('Playback closed. Selection preview is available.');
+ });
  const edit = (command: EditCommand) => run(async () => {
   if (!facade.current || !snapshot) return;
   install(await facade.current.command(snapshot, command)); setStatus('Changes applied by the shared core. Download the project to keep them.');
@@ -133,8 +167,16 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
   <input className="visually-hidden" ref={projectInput} type="file" accept=".json,application/json" onChange={event => { loadProject(event.target.files?.[0]); event.target.value = ''; }} />
   {error && <p role="alert" className="practice-error">{error}</p>}<p role="status">{busy ? busyLabel : status}</p>
   {snapshot && <>
-   <p className="practice-capability">{snapshot.capabilities.formats.join(', ')} · {duration.toFixed(3)} source seconds · {snapshot.capabilities.streamPreview ? 'Preview the saved selection once at the accepted speed and pitch.' : 'Audio preview is unavailable; this browser needs the processing build and audio support.'} Live loop playback is unavailable.</p>
-   <div className="practice-actions"><button type="button" disabled={!snapshot.capabilities.streamPreview || !facade.current?.preview || busy} onClick={() => void preview()}>Preview selection</button><button type="button" disabled={!snapshot.capabilities.liveTransport || busy}>Play / pause</button><button type="button" disabled={busy} onClick={() => void overview()}>Full overview</button><button type="button" disabled={busy} onClick={() => void zoom()}>Exact selection zoom</button></div>
+   <p className="practice-capability">{snapshot.capabilities.formats.join(', ')} · {duration.toFixed(3)} source seconds · {snapshot.capabilities.streamPreview ? 'Preview the saved selection once at the accepted speed and pitch.' : 'Audio preview is unavailable; this browser needs the processing build and audio support.'} {facade.current?.liveSupported && snapshot.capabilities.streamPreview ? 'Live playback follows the saved speed, pitch and A/B loop.' : 'Live playback is unavailable in this browser.'}</p>
+   <div className="practice-actions"><button type="button" disabled={!snapshot.capabilities.streamPreview || !facade.current?.preview || snapshot.capabilities.liveTransport || busy} onClick={() => void preview()}>Preview selection</button><button type="button" disabled={busy || !(snapshot.capabilities.liveTransport || (facade.current?.liveSupported && snapshot.capabilities.streamPreview)) || snapshot.transport?.state === 'error'} onClick={() => void transport({type: snapshot.transport?.state === 'playing' ? 'pause' : 'play'})}>{snapshot.transport?.state === 'playing' ? 'Pause playback' : 'Play'}</button>
+    <button type="button" disabled={busy || !snapshot.capabilities.liveTransport || snapshot.transport?.state === 'error'} onClick={() => void transport({type:'stop'})}>Stop</button>
+    <button type="button" disabled={busy || !snapshot.capabilities.liveTransport || snapshot.transport?.state === 'error'} onClick={() => void transport({type:'restart'})}>Restart</button>
+    {snapshot.capabilities.liveTransport && <button type="button" disabled={busy} onClick={() => void releasePlayback()}>Close playback</button>}
+    {snapshot.transport?.state === 'error' && <button type="button" disabled={busy} onClick={() => void transport({type:'recover'})}>Recover playback</button>}<button type="button" disabled={busy} onClick={() => void overview()}>Full overview</button><button type="button" disabled={busy} onClick={() => void zoom()}>Exact selection zoom</button></div>
+   {snapshot.transport && <>
+    <p aria-label="Playback position">{snapshot.transport.state} · {(snapshot.transport.sourceFrame / snapshot.project.track.audio.sampleRate).toFixed(3)} source seconds · {snapshot.transport.completedLoops} completed loops</p>
+    <div className="practice-form"><label>Seek (source seconds)<input type="number" step={1 / snapshot.project.track.audio.sampleRate} value={seekSeconds} onChange={event => setSeekSeconds(event.target.value)} disabled={busy} /></label><button type="button" disabled={busy || snapshot.transport.state === 'error'} onClick={() => void transport({type:'seek',position:Math.round(Number(seekSeconds)*snapshot.project.track.audio.sampleRate)})}>Seek</button></div>
+   </>}
    {wave && <><svg className="practice-waveform" viewBox="0 0 1000 160" role="img" aria-label={`${detailView ? 'Exact selection' : 'Track overview'} waveform; click sets selection start, Shift-click sets end`} onClick={selectInView}>
     <rect x="0" y="0" width="1000" height="160" fill="transparent" />
     {wave.cells.map((cell, index) => cell.channels.map((peak, channel) => <line key={`${index}-${channel}`} x1={(cell.startFrame - viewStart) / viewLength * 1000} x2={(cell.startFrame - viewStart) / viewLength * 1000} y1={40 + channel * 80 - peak.max * 35} y2={40 + channel * 80 - peak.min * 35} stroke="currentColor" strokeWidth="2" />))}

@@ -55,3 +55,22 @@ stalledHost.monitor.progressAt = performance.now() - 10001; stalledHost.monitor.
 await stalledHost.closing; assert.equal(stalledReader.snapshot().state, PresentedState.failed);
 assert.match(stalledHost.failure.message, /stopped advancing/); await stalledHost.close();
 console.log(JSON.stringify({ stalledPresentationClosesBeforeFailedPublication:true }));
+
+// Close rejection falls back to a real suspension fence, never immediate failure
+// publication. If both fences reject, the shared counter stays unacknowledged.
+const rejectedContext = new Context(); let suspendFence;
+const rejectedHost = new LiveOutputHost(rejectedContext, 1, () => {});
+const rejectedBuffers = await rejectedHost.reset(), rejectedReader = new PresentedReader(rejectedBuffers.presented);
+rejectedContext.close = async () => { rejectedContext.closes++; throw new Error('close rejected'); };
+rejectedContext.suspend = () => new Promise(resolve => { suspendFence = () => { rejectedContext.state='suspended'; resolve(); }; });
+const fallback = rejectedHost.fail(new Error('output failed')); await delay(1);
+assert.equal(rejectedReader.snapshot().state, PresentedState.quiescent);
+suspendFence(); await fallback; assert.equal(rejectedReader.snapshot().state, PresentedState.failed);
+await rejectedHost.close(); assert.equal(rejectedContext.closes, 1);
+const unavailableContext = new Context(), unavailableHost = new LiveOutputHost(unavailableContext, 1, () => {});
+const unavailableBuffers = await unavailableHost.reset(), unavailableReader = new PresentedReader(unavailableBuffers.presented);
+unavailableContext.close = async () => { throw new Error('close rejected'); };
+unavailableContext.suspend = async () => { throw new Error('suspend rejected'); };
+await assert.rejects(unavailableHost.fail(new Error('device fault')), /could not quiesce/);
+assert.equal(unavailableReader.snapshot().state, PresentedState.quiescent);
+console.log(JSON.stringify({ closeRejectionWaitsForSuspendFence:true, failedFencesDoNotPublishQuiescence:true }));

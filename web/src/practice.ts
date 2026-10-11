@@ -5,14 +5,19 @@ export interface WaveWindow { version: number; sha256: string; sampleRate: numbe
 export interface Region { id: string; label: string; start: number; end: number; notes?: string }
 export interface Annotations { notes?: string; regions?: Region[]; markers?: { id: string; kind: 'section' | 'measure' | 'beat'; label: string; position: number; measure?: number; beat?: number; notes?: string }[]; loops?: { id: string; label: string; regionId: string }[]; bookmarks?: { id: string; label: string; position: number }[] }
 export interface Project { version: number; name: string; track: { path: string; audio: { encoding: string; sampleRate: number; channels: number; frames: number; sha256: string } }; settings: { speed: number; pitch: number; loop: { enabled: boolean; start: number; end: number } }; annotations: Annotations; practicePlans?: unknown[] }
-export interface Snapshot { version: number; sequence: number; state: string; project: Project; capabilities: { formats: string[]; offlineRender: boolean; liveTransport: boolean; streamPreview?: boolean } }
+export interface Snapshot { version: number; sequence: number; state: string; transport?: { generation: number; state: string; sourceFrame: number; consumedOutputFrame: number; completedLoops: number; error?: string }; project: Project; capabilities: { formats: string[]; offlineRender: boolean; liveTransport: boolean; streamPreview?: boolean } }
 export type EditCommand = { type: 'set_parameters'; speed?: number; pitch?: number } | { type: 'set_loop'; loop: Project['settings']['loop'] } | { type: 'set_annotations'; annotations: Annotations };
 export interface PracticeResponse { version: number; snapshot?: Snapshot; window?: WaveWindow; document?: string; preview?: { outputFrames: number; copiedFrames: number; underrunFrames: number; startupMilliseconds: number }; events?: { events: { sequence: number; type: string }[]; dropped: number }; error?: { version: number; code: string; message: string } }
+export type LiveCommand = { type: 'play' | 'pause' | 'stop' | 'restart' | 'recover' } | { type: 'seek'; position: number };
 export interface PracticeFacade {
  open(source: File, project?: File): Promise<PracticeResponse>;
  command(snapshot: Snapshot, command: EditCommand): Promise<PracticeResponse>;
  waveform(startFrame: number, endFrame: number, detail?: boolean): Promise<PracticeResponse>;
  exportProject(): Promise<PracticeResponse>;
+ liveSupported?: boolean;
+ transport?(snapshot: Snapshot, command: LiveCommand): Promise<PracticeResponse>;
+ pollTransport?(): Promise<PracticeResponse>;
+ detachTransport?(): Promise<PracticeResponse>;
  events(): Promise<PracticeResponse>;
  preview?(snapshot: Snapshot, controlsReady?: () => void): Promise<PracticeResponse>;
  pausePreview?(): Promise<boolean>;
@@ -21,6 +26,7 @@ export interface PracticeFacade {
  dispose(): void;
 }
 interface PresentationMonitorPort { failure?: Error; finish(expectedFrames: number): Promise<void>; waitForFrames(expectedFrames: number): Promise<number>; close(): void }
+interface LiveHostPort { context: AudioContext; reset(): Promise<{queue: SharedArrayBuffer; presented: SharedArrayBuffer}>; start(): Promise<void>; suspend(): Promise<void>; fail(error: Error): Promise<void>; close(): Promise<void> }
 interface OutputBoundaryPort { pause(): Promise<boolean>; resume(): Promise<void>; close(): void }
 interface OutputQueueFactory {
  createOutputQueue(channels: number): SharedArrayBuffer;
@@ -31,6 +37,10 @@ interface OutputQueueFactory {
 export class BrowserPractice implements PracticeFacade {
  private worker = new Worker('/practice/worker.js');
  private next = 0;
+ private serial: Promise<unknown> = Promise.resolve();
+ private liveHost?: LiveHostPort;
+ private liveSetup?: Promise<void>;
+ liveSupported = globalThis.crossOriginIsolated && typeof AudioContext === 'function' && typeof AudioContext.prototype.getOutputTimestamp === 'function';
  private pending = new Map<number, { resolve: (result: PracticeResponse) => void; reject: (error: Error) => void }>();
  private ready: Promise<void>;
  private disposed = false;
@@ -38,11 +48,13 @@ export class BrowserPractice implements PracticeFacade {
  private outputBoundary?: OutputBoundaryPort;
  private previewAbort?: (error?: Error) => void;
  private loadOutput: () => Promise<OutputQueueFactory>;
+ private loadLive: () => Promise<{LiveOutputHost: new (context: AudioContext, channels: number, onFailure: (error: Error) => void) => LiveHostPort}>;
  private audioClosures = new WeakMap<AudioContext, Promise<void>>();
  private readyCancel?: (error: Error) => void;
  private readyTimeout?: ReturnType<typeof setTimeout>;
  private previewSupported = globalThis.crossOriginIsolated && typeof AudioContext === 'function' && 'audioWorklet' in AudioContext.prototype;
- constructor(options: { loadOutput?: () => Promise<OutputQueueFactory> } = {}) {
+ constructor(options: { loadOutput?: () => Promise<OutputQueueFactory>; loadLive?: BrowserPractice['loadLive'] } = {}) {
+  this.loadLive = options.loadLive ?? (() => import(/* @vite-ignore */ new URL('/practice/live-output-host.mjs', location.origin).href));
   this.loadOutput = options.loadOutput ?? (async () => {
    const url = new URL('/practice/output-queue.mjs', location.origin).href;
    const [queue, timeline, monitor, boundary] = await Promise.all([
@@ -58,6 +70,7 @@ export class BrowserPractice implements PracticeFacade {
    const timeout = this.readyTimeout = setTimeout(() => { reject(new Error('Practice core did not load.')); this.dispose(); }, 30000);
    this.worker.onmessage = (event: MessageEvent) => {
     const data = event.data;
+    if (data.type === 'live_call') void this.handleLiveCall(data);
     if (data.type === 'ready') { clearTimeout(timeout); this.readyCancel = undefined; resolve(); }
     if (data.type === 'fatal') { clearTimeout(timeout); const error = new Error(data.message); reject(error); this.shutdown(error); }
     if (data.type === 'result') { const call = this.pending.get(data.id); this.pending.delete(data.id); call?.resolve(data.response); }
@@ -69,11 +82,14 @@ export class BrowserPractice implements PracticeFacade {
   void this.ready.catch(() => {});
  }
  private fail(error: Error) { for (const call of this.pending.values()) call.reject(error); this.pending.clear(); }
- private async request(request: Record<string, unknown>, file?: File, document = '', queue?: SharedArrayBuffer): Promise<PracticeResponse> {
-  await this.ready;
-  if (this.disposed) throw new Error('Practice workspace has closed.');
-  const id = ++this.next;
-  return new Promise((resolve, reject) => { this.pending.set(id, { resolve, reject }); try { this.worker.postMessage({ id, request: { version: 1, ...request }, file, document, queue, previewSupported: this.previewSupported }); } catch (error) { this.pending.delete(id); reject(error instanceof Error ? error : new Error(String(error))); } });
+ private request(request: Record<string, unknown>, file?: File, document = '', queue?: SharedArrayBuffer): Promise<PracticeResponse> {
+  const invoke = async (): Promise<PracticeResponse> => {
+   await this.ready;
+   if (this.disposed) throw new Error('Practice workspace has closed.');
+   const id = ++this.next;
+   return new Promise((resolve, reject) => { this.pending.set(id, { resolve, reject }); try { this.worker.postMessage({ id, request: { version: 1, ...request }, file, document, queue, previewSupported: this.previewSupported, liveSupported: this.liveSupported }); } catch (error) { this.pending.delete(id); reject(error instanceof Error ? error : new Error(String(error))); } });
+  };
+  const result = this.serial.then(invoke); this.serial = result.catch(() => {}); return result;
  }
  async open(source: File, project?: File) {
   if (project && project.size > 1048576) throw new Error('Project exceeds 1 MiB.');
@@ -83,6 +99,79 @@ export class BrowserPractice implements PracticeFacade {
  waveform(startFrame: number, endFrame: number, detail = false) { return this.request({ type: detail ? 'detail' : 'waveform', startFrame, endFrame, bins: detail ? 4096 : 512 }); }
  exportProject() { return this.request({ type: 'export' }); }
  events() { return this.request({ type: 'events' }); }
+ private async handleLiveCall(message: { id: number; method: string; args?: {channels?: number; sampleRate?: number; message?: string} }) {
+  try {
+   if (!Number.isSafeInteger(message.id) || message.id < 1) throw new Error('Invalid live host request.');
+   let result: unknown = {};
+   if (message.method === 'open') {
+    await this.liveSetup;
+    if (!this.liveHost || this.liveHost.context.sampleRate !== message.args?.sampleRate) throw new Error('Live output was not prepared from a user action.');
+   } else if (message.method === 'close') {
+    const host = this.liveHost;
+    await host?.close();
+    if (this.liveHost === host) this.liveHost = undefined;
+    if (this.audio === host?.context) this.audio = undefined;
+   } else {
+    const host = this.liveHost; if (!host) throw new Error('Live output host is unavailable.');
+    switch (message.method) {
+    case 'reset': result = await host.reset(); break;
+    case 'start': await host.start(); break;
+    case 'suspend': await host.suspend(); break;
+    case 'fail': await host.fail(new Error(message.args?.message || 'Live device failed.')); break;
+    default: throw new Error('Unknown live host operation.');
+    }
+   }
+   if (!this.disposed) this.worker.postMessage({type:'live_result', id:message.id, result});
+  } catch (error) { if (!this.disposed) this.worker.postMessage({type:'live_result', id:message.id, error:String(error)}); }
+ }
+ private prepareLive(snapshot: Snapshot, beforeInstall: Promise<unknown> = Promise.resolve()) {
+  if (!this.liveSupported || !snapshot.capabilities.streamPreview) throw new Error('Live output is unavailable in this browser.');
+  const context = new AudioContext({sampleRate:snapshot.project.track.audio.sampleRate, latencyHint:'interactive'});
+  const resumed = context.resume(); void resumed.catch(() => {});
+  let abort: (error?: Error) => void = () => {};
+  const cancelled = new Promise<never>((_resolve,reject) => { abort = (error = new Error('cancelled: live output setup cancelled')) => reject(error); });
+  void cancelled.catch(() => {}); this.previewAbort = abort;
+  const ready = (async () => {
+   try {
+    if (context.sampleRate !== snapshot.project.track.audio.sampleRate) throw new Error('This device does not support the original live sample rate.');
+    const module = await Promise.race([this.loadLive(),cancelled]);
+    await Promise.race([context.audioWorklet.addModule('/practice/output-worklet.mjs'),cancelled]);
+    await Promise.race([Promise.all([resumed,beforeInstall]),cancelled]);
+    if (this.disposed) throw new Error('Practice workspace closed.');
+    this.audio = context;
+    this.liveHost = new module.LiveOutputHost(context,snapshot.project.track.audio.channels,() => {});
+   } catch (error) { await this.closeAudio(context); if (this.audio === context) this.audio = undefined; if (this.liveHost?.context === context) this.liveHost = undefined; throw error; }
+  })();
+  this.liveSetup = ready; void ready.catch(() => {});
+  return {ready, abort, context};
+ }
+ async transport(snapshot: Snapshot, command: LiveCommand): Promise<PracticeResponse> {
+  if (this.disposed) throw new Error('Practice workspace closed.');
+  let current = snapshot, prepared: ReturnType<BrowserPractice['prepareLive']> | undefined;
+  try {
+   if (command.type === 'recover') {
+    // Rearm context from this user action before any await. Old-device close
+    // retains its own host until detach replies; it cannot close the new context.
+    const detached = this.request({type:'detach_transport'});
+    prepared = this.prepareLive(snapshot, detached);
+    const response = await detached; if (response.error) { prepared.abort(new Error(response.error.message)); await prepared.ready.catch(() => {}); await this.liveHost?.close(); await this.closeAudio(prepared.context); if (this.audio === prepared.context) this.audio = undefined; this.liveHost = undefined; return response; }
+    current = response.snapshot ?? current;
+   }
+   if (!current.capabilities.liveTransport) {
+    if (!prepared) {
+     if (this.audio) throw new Error('An audio preview is already running.');
+     prepared = this.prepareLive(current);
+    }
+    await prepared.ready;
+    const attached = await this.request({type:'attach_transport'});
+    if (attached.error) { await this.liveHost?.close(); this.liveHost = undefined; if (this.audio === prepared.context) this.audio = undefined; return attached; }
+    current = attached.snapshot ?? current;
+   }
+   return await this.request({type:'command',command:{version:current.version,sequence:current.sequence+1,...(command.type === 'recover' ? {type:'stop'} : command)}});
+  } finally { if (prepared && this.previewAbort === prepared.abort) this.previewAbort = undefined; }
+ }
+ pollTransport() { return this.request({type:'poll_transport'}); }
+ detachTransport() { return this.request({type:'detach_transport'}); }
  async preview(snapshot: Snapshot, controlsReady?: () => void) {
   if (this.disposed) throw new Error('Practice workspace has closed.');
   if (!this.previewSupported || !snapshot.capabilities.streamPreview) throw new Error('Audio preview is unavailable in this browser.');
@@ -142,7 +231,7 @@ export class BrowserPractice implements PracticeFacade {
   if (!closing) { closing = context.state === 'closed' ? Promise.resolve() : context.close(); this.audioClosures.set(context, closing); }
   return closing;
  }
- cancel() { this.outputBoundary?.close(); this.previewAbort?.(); if (!this.disposed) this.worker.postMessage({ type: 'cancel', previewSupported: this.previewSupported }); if (this.audio) void this.audio.suspend().catch(() => {}); }
+ cancel() { this.outputBoundary?.close(); this.previewAbort?.(); if (!this.disposed) this.worker.postMessage({ type: 'cancel', previewSupported: this.previewSupported, liveSupported: this.liveSupported }); if (this.liveHost) void this.liveHost.fail(new Error('cancelled: live command cancelled')).catch(() => {}); else if (this.audio) void this.audio.suspend().catch(() => {}); }
  private shutdown(error: Error) {
   if (this.disposed) return;
   this.disposed = true;
@@ -151,7 +240,8 @@ export class BrowserPractice implements PracticeFacade {
   this.outputBoundary?.close();
   this.previewAbort?.(error);
   this.worker.terminate(); this.fail(error);
-  if (this.audio) void this.closeAudio(this.audio).catch(() => {});
+  void this.liveHost?.close().catch(() => {});
+  if (this.audio && this.audio !== this.liveHost?.context) void this.closeAudio(this.audio).catch(() => {});
  }
  dispose() { this.shutdown(new Error('Practice workspace closed.')); }
 }

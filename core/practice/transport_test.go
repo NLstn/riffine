@@ -92,10 +92,14 @@ type sessionFactory struct {
 	device *sessionDevice
 	err    error
 	opens  int
+	onOpen func()
 }
 
 func (f *sessionFactory) OpenLive(ctx context.Context, source VerifiedSource) (LiveDevice, error) {
 	f.opens++
+	if f.onOpen != nil {
+		f.onOpen()
+	}
 	if f.device != nil {
 		f.device.source = source
 	}
@@ -351,4 +355,24 @@ func TestMissingLiveFactoryAndCancelledAttachmentDoNotOpenResources(t *testing.T
 	}
 	_, err := session.Dispatch(context.Background(), Command{Version: 1, Sequence: 1, Type: "seek", Position: new(int64)})
 	errorCode(t, err, UnsupportedCapability)
+}
+
+func TestCancellationDuringLiveFactoryFencesDeviceBeforeReader(t *testing.T) {
+	for _, returnsDevice := range []bool{false, true} {
+		t.Run(map[bool]string{false: "factory error", true: "completed open races cancellation"}[returnsDevice], func(t *testing.T) {
+			session, host, device, factory := liveSession(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			factory.onOpen = cancel
+			if !returnsDevice {
+				factory.err = context.Canceled
+			}
+			before := session.Snapshot()
+			errorCode(t, session.AttachTransport(ctx), Cancelled)
+			after := session.Snapshot()
+			if after.Sequence != before.Sequence || after.Capabilities.LiveTransport || device.closed != 1 || host.opened != host.closed || device.closeReaderCount != host.closed-1 {
+				t.Fatalf("cancelled attachment escaped ownership fence: snapshot=%+v device=%+v resources=%d/%d", after, device, host.opened, host.closed)
+			}
+		})
+	}
 }
