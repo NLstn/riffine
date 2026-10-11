@@ -94,7 +94,7 @@ func (c PeakCache) Put(ctx context.Context, key string, data []byte) error {
 	}
 	// Cache publication uses the platform rename replacement operation. Failure
 	// preserves the prior complete cache; caller can still use the new pyramid.
-	return os.Rename(file.Name(), path)
+	return publishPeakCache(ctx, file.Name(), path)
 }
 
 var _ waveform.Cache = PeakCache{}

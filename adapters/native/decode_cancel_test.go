@@ -20,8 +20,17 @@ func TestMain(m *testing.M) {
 		case "formats":
 			fmt.Print(`{"abi":1,"formats":["wav-pcm","flac","mp3"]}`)
 		case "decoder-info":
-			fmt.Print(`{"encoding":"mp3","sampleRate":48000,"channels":1,"bits":0,"frames":48000}`)
+			frames := 48000
+			if os.Getenv("RIFFINE_DECODER_TEST_FINAL_WAIT") == "1" {
+				frames = 1024
+			}
+			fmt.Printf(`{"encoding":"mp3","sampleRate":48000,"channels":1,"bits":0,"frames":%d}`, frames)
 		case "decoder-read":
+			if os.Getenv("RIFFINE_DECODER_TEST_FINAL_WAIT") == "1" {
+				if _, err := os.Stdout.Write(make([]byte, 1024*4)); err != nil {
+					os.Exit(1)
+				}
+			}
 			if err := os.WriteFile(os.Getenv("RIFFINE_DECODER_TEST_SIGNAL"), []byte("started"), 0600); err != nil {
 				os.Exit(1)
 			}
@@ -34,6 +43,15 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 func TestReadCancellationKillsStalledWorker(t *testing.T) {
+	testStalledWorkerCancellation(t, false)
+}
+func TestFinalReadCancellationKillsStalledWorker(t *testing.T) {
+	testStalledWorkerCancellation(t, true)
+}
+func testStalledWorkerCancellation(t *testing.T, finalWait bool) {
+	if finalWait {
+		t.Setenv("RIFFINE_DECODER_TEST_FINAL_WAIT", "1")
+	}
 	dir := t.TempDir()
 	signal := filepath.Join(dir, "started")
 	path := filepath.Join(dir, "fake-source.mp3")
