@@ -40,11 +40,11 @@ func TestVersionOneMigration(t *testing.T) {
 	p.Settings.Pitch = 4
 	p.Settings.Loop = Loop{Enabled: true, Start: .25, End: .75}
 	old := struct {
-		Version  int      `json:"version"`
-		Name     string   `json:"name"`
-		Track    Track    `json:"track"`
-		Settings Settings `json:"settings"`
-	}{1, p.Name, p.Track, p.Settings}
+		Version  int         `json:"version"`
+		Name     string      `json:"name"`
+		Track    legacyTrack `json:"track"`
+		Settings Settings    `json:"settings"`
+	}{1, p.Name, legacyFixture(p.Track), p.Settings}
 	b, _ := json.Marshal(old)
 	before := append([]byte(nil), b...)
 	migrated, e := Decode(bytes.NewReader(b))
@@ -107,4 +107,15 @@ func TestMigrationGoldenFixture(t *testing.T) {
 	if !reflect.DeepEqual(migrated, want) {
 		t.Fatal("migration differs from v2 fixture", migrated, want)
 	}
+}
+
+func legacyFixture(t Track) legacyTrack {
+	var old legacyTrack
+	old.Path = t.Path
+	old.Audio.SampleRate = t.Audio.SampleRate
+	old.Audio.Channels = t.Audio.Channels
+	old.Audio.Bits = t.Audio.Bits
+	old.Audio.Frames = t.Audio.Frames
+	old.Audio.SHA256 = t.Audio.SHA256
+	return old
 }

@@ -1,5 +1,11 @@
 #include "riffine_audio.h"
 #include "riffine_preview.h"
+#include "riffine_decode.h"
+#include <cstring>
+#ifdef _WIN32
+#include <io.h>
+#include <fcntl.h>
+#endif
 #include <cstdio>
 #include <stdexcept>
 #include <string>
@@ -13,6 +19,34 @@ int run(int argc, char **argv) {
   try {
     if(argc==2 && std::string(argv[1])=="version") {std::puts("riffine-audio ABI 1; Signalsmith Stretch + miniaudio");return 0;}
     int result=1;
+    auto operation = argc > 1 ? std::string(argv[1]) : std::string();
+    if(argc==2 && operation=="formats") { std::puts(R"({"abi":1,"formats":["wav-pcm","flac","mp3"]})"); return 0; }
+    if((argc==3 && operation=="decoder-info") || (argc==4 && operation=="decoder-read")) {
+      riffine_decoder *raw=nullptr;
+      if(riffine_decoder_open_file(argv[2],&raw,error,sizeof(error))) throw std::runtime_error(error);
+      struct Owner {riffine_decoder *value;~Owner(){riffine_decoder_close(value);}} owner{raw};
+      riffine_decoder_info info{};
+      if(riffine_decoder_info_get(raw,&info,error,sizeof(error))) throw std::runtime_error(error);
+      const char *encoding=info.encoding==1 ? "wav-pcm" : info.encoding==2 ? "flac" : "mp3";
+      if(operation=="decoder-info") {
+        std::printf(R"({"encoding":"%s","sampleRate":%u,"channels":%u,"bits":%u,"frames":%llu})" "\n",encoding,info.sample_rate,info.channels,info.source_bits,(unsigned long long)info.frames);return 0;
+      }
+      auto start=std::stoull(argv[3]);
+      if(riffine_decoder_seek(raw,start,error,sizeof(error))) throw std::runtime_error(error);
+#ifdef _WIN32
+      if(_setmode(_fileno(stdout),_O_BINARY)==-1) throw std::runtime_error("cannot set binary PCM output");
+#endif
+      std::vector<float> pcm(8192*info.channels);std::vector<unsigned char> bytes(pcm.size()*4);
+      for(;;) {
+        uint32_t frames=0;
+        if(riffine_decoder_read(raw,pcm.data(),8192,&frames,error,sizeof(error))) throw std::runtime_error(error);
+        if(!frames)break;
+        for(size_t i=0;i<size_t(frames)*info.channels;++i){uint32_t word;std::memcpy(&word,&pcm[i],4);for(unsigned b=0;b<4;++b)bytes[i*4+b]=static_cast<unsigned char>(word>>(8*b));}
+        auto count=size_t(frames)*info.channels*4;
+        if(std::fwrite(bytes.data(),1,count,stdout)!=count)throw std::runtime_error("cannot write decoded PCM");
+      }
+      if(std::fflush(stdout)!=0)throw std::runtime_error("cannot flush decoded PCM");return 0;
+    }
     if(argc==8 && std::string(argv[1])=="render") {
       result=riffine_render(argv[2],argv[3],std::stoll(argv[4]),std::stoll(argv[5]),std::stod(argv[6]),std::stod(argv[7]),error,sizeof(error));
     } else if(argc==8 && std::string(argv[1])=="preview") {

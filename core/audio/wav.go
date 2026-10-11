@@ -1,4 +1,4 @@
-// Package audio provides bounded PCM WAV import and waveform extraction.
+// Package audio defines source metadata and bounded PCM import/analysis ports.
 package audio
 
 import (
@@ -14,11 +14,15 @@ import (
 	"github.com/NLstn/riffine/core/resource"
 )
 
-// Info describes an interleaved integer PCM WAV. Frames are per channel.
+// Info describes original decoded source coordinates. Frames are per channel.
+// Encoding is tested codec identity; Bits is optional original sample precision
+// (zero means not applicable/unknown, as for lossy MP3). WAV cursor fields never
+// enter portable documents.
 type Info struct {
+	Encoding   string `json:"encoding"`
 	SampleRate int    `json:"sampleRate"`
 	Channels   int    `json:"channels"`
-	Bits       int    `json:"bits"`
+	Bits       int    `json:"bits,omitempty"`
 	Frames     int64  `json:"frames"`
 	SHA256     string `json:"sha256"`
 	DataOffset int64  `json:"-"`
@@ -46,7 +50,7 @@ func Inspect(ctx context.Context, source resource.Reader) (Info, error) {
 	if end != source.Size() || end < 12 {
 		return Info{}, errors.New("invalid RIFF size")
 	}
-	var info Info
+	info := Info{Encoding: "wav-pcm"}
 	var formatFound, dataFound bool
 	for pos := int64(12); pos < end; {
 		if end-pos < 8 {
@@ -139,48 +143,9 @@ func Peaks(ctx context.Context, source resource.Reader, bins int) (Waveform, err
 	if err != nil {
 		return Waveform{}, err
 	}
-	if int64(bins) > info.Frames {
-		bins = int(info.Frames)
-	}
-	w := Waveform{SampleRate: info.SampleRate, Frames: info.Frames, Channels: make([][]Peak, info.Channels)}
-	for c := range w.Channels {
-		w.Channels[c] = make([]Peak, bins)
-		for b := range w.Channels[c] {
-			w.Channels[c][b] = Peak{Min: 1, Max: -1}
-		}
-	}
-	f := io.NewSectionReader(contextReader{ctx, source}, info.DataOffset, info.DataBytes)
-	bytesPerSample := info.Bits / 8
-	align := bytesPerSample * info.Channels
-	buf := make([]byte, 4096*align)
-	for frame := int64(0); frame < info.Frames; {
-		n := min(int64(4096), info.Frames-frame)
-		if _, err = io.ReadFull(f, buf[:int(n)*align]); err != nil {
-			return Waveform{}, err
-		}
-		for j := int64(0); j < n; j++ {
-			bin := int((frame + j) * int64(bins) / info.Frames)
-			for c := 0; c < info.Channels; c++ {
-				b := buf[int(j)*align+c*bytesPerSample:]
-				var v float32
-				switch info.Bits {
-				case 16:
-					v = float32(int16(binary.LittleEndian.Uint16(b))) / 32768
-				case 24:
-					x := int32(b[0]) | int32(b[1])<<8 | int32(b[2])<<16
-					x = (x << 8) >> 8
-					v = float32(x) / 8388608
-				case 32:
-					v = float32(float64(int32(binary.LittleEndian.Uint32(b))) / 2147483648)
-				}
-				p := &w.Channels[c][bin]
-				p.Min = min(p.Min, v)
-				p.Max = max(p.Max, v)
-			}
-		}
-		frame += n
-	}
-	return w, nil
+	stream := &wavPCM{source: source, info: info, raw: make([]byte, PCMBlockFrames*info.Channels*info.Bits/8)}
+	defer stream.Close()
+	return PeaksFromPCM(ctx, info, stream, bins)
 }
 
 // WriteTone writes a deterministic PCM16 sine fixture without copyrighted audio.

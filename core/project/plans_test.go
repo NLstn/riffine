@@ -45,13 +45,13 @@ func TestVersionTwoMigrationPreservesAllAnnotations(t *testing.T) {
 	old := struct {
 		Version     int         `json:"version"`
 		Name        string      `json:"name"`
-		Track       Track       `json:"track"`
+		Track       legacyTrack `json:"track"`
 		Settings    Settings    `json:"settings"`
 		Annotations Annotations `json:"annotations"`
-	}{2, p.Name, p.Track, p.Settings, p.Annotations}
+	}{2, p.Name, legacyFixture(p.Track), p.Settings, p.Annotations}
 	data, _ := json.Marshal(old)
 	migrated, e := Decode(bytes.NewReader(data))
-	if e != nil || migrated.Version != 3 || !reflect.DeepEqual(migrated.Annotations, p.Annotations) || migrated.Track != p.Track || migrated.Settings != p.Settings {
+	if e != nil || migrated.Version != Version || !reflect.DeepEqual(migrated.Annotations, p.Annotations) || migrated.Track != p.Track || migrated.Settings != p.Settings {
 		t.Fatal(migrated, e)
 	}
 	if len(migrated.PracticePlans) != 0 {

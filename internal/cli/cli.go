@@ -13,7 +13,6 @@ import (
 
 	"github.com/NLstn/riffine/adapters/filesystem"
 	"github.com/NLstn/riffine/adapters/native"
-	"github.com/NLstn/riffine/core/audio"
 	"github.com/NLstn/riffine/core/practice"
 	"github.com/NLstn/riffine/core/project"
 	"github.com/NLstn/riffine/core/waveform"
@@ -43,7 +42,7 @@ Flags precede no positional arguments. Outputs are exclusive; save updates a ver
 Render processes the enabled loop once; play repeats it until Ctrl+C.
 Play renders a temporary WAV first. Speed/pitch changes are offline in this slice.
 Preview streams the selected range once, with fixed speed/pitch; --silent uses a null device.
-Only PCM 16/24/32-bit mono/stereo WAV import is currently supported.
+WAV PCM works in Go; FLAC/MP3 require a helper with tested decoder capabilities.
 `
 
 func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
@@ -64,7 +63,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 	case "scan":
 		f.StringVar(&source, "sources", "", "bounded JSON list of local source locators")
 	case "import", "relink":
-		f.StringVar(&source, "audio", "", "local source WAV")
+		f.StringVar(&source, "audio", "", "local source audio")
 		f.StringVar(&dest, "out", "", "new project path")
 		if command == "relink" {
 			f.StringVar(&proj, "project", "", "existing project")
@@ -162,7 +161,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 	if command == "scan" {
 		return scanSources(ctx, source, out)
 	}
-	service := practice.Service{Resources: filesystem.Host{}, Store: filesystem.Host{}, Decoder: audio.WAVDecoder{}}
+	service := practice.Service{Resources: filesystem.Host{}, Store: filesystem.Host{}, Decoder: localDecoder(ctx, errOut)}
 	if command == "import" {
 		session, err := service.Import(ctx, source, dest)
 		if err != nil {
