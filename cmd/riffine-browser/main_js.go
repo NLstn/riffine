@@ -59,7 +59,11 @@ func main() {
 					fail(id, err)
 					return
 				}
-				current = binding.New(practice.Service{Resources: host, Store: host, Decoder: audio.WAVDecoder{}})
+				service := practice.Service{Resources: host, Store: host, Decoder: audio.WAVDecoder{}}
+				if browser.PreviewAvailable() {
+					service.SourcePreviewer = browser.Previewer{}
+				}
+				current = binding.New(service)
 			}
 			if current == nil {
 				fail(id, errors.New("select a source to open practice"))

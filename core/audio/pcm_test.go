@@ -136,3 +136,54 @@ func (r *observedPCMReader) ReadAt(p []byte, o int64) (int, error) {
 	r.maxRead = max(r.maxRead, len(p))
 	return r.Reader.ReadAt(p, o)
 }
+
+type inspectedPCMReader struct {
+	memoryReader
+	reads int
+}
+
+func (r *inspectedPCMReader) ReadAt(p []byte, offset int64) (int, error) {
+	r.reads++
+	return r.memoryReader.ReadAt(p, offset)
+}
+func TestVerifiedPCMUsesInspectedOffsetsWithoutRehashing(t *testing.T) {
+	var data bytes.Buffer
+	if err := WriteTone(&data, 1, 440, 48000, 1); err != nil {
+		t.Fatal(err)
+	}
+	reader := &inspectedPCMReader{memoryReader: memoryReader{bytes.NewReader(data.Bytes())}}
+	ctx := context.Background()
+	info, err := Inspect(ctx, reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader.reads = 0
+	stream, err := (WAVDecoder{}).OpenVerifiedPCM(ctx, reader, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reader.reads != 0 {
+		t.Fatal("verified opening re-read original bytes")
+	}
+	if err = stream.SeekFrame(ctx, 12000); err != nil {
+		t.Fatal(err)
+	}
+	samples := make([]float32, 512)
+	if count, err := stream.ReadFrames(ctx, samples); err != nil || count != 512 || reader.reads != 1 {
+		t.Fatalf("read %d %v calls=%d", count, err, reader.reads)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Project JSON omits offsets: it cannot be used as inspected decoder metadata.
+	saved := info
+	saved.DataOffset, saved.DataBytes = 0, 0
+	if _, err := (WAVDecoder{}).OpenVerifiedPCM(ctx, reader, saved); err == nil {
+		t.Fatal("saved metadata accepted as inspected offsets")
+	}
+	beyond := info
+	beyond.DataOffset = reader.Size()
+	if _, err := (WAVDecoder{}).OpenVerifiedPCM(ctx, reader, beyond); err == nil {
+		t.Fatal("PCM range outside borrowed resource accepted")
+	}
+}

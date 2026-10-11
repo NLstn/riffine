@@ -2,7 +2,9 @@
 importScripts('./wasm_exec.js');
 const go = new Go();
 self.onmessage = (event) => {
-  const { id, request, file, document = '', type } = event.data;
+  const { id, request, file, document = '', type, previewSupported, queue } = event.data;
+ self.riffinePreviewEnabled = !!previewSupported;
+ if (request?.type === 'preview') self.riffinePreviewQueue = queue;
   if (type === 'cancel') { self.riffinePracticeCancel?.(); return; }
   if (typeof self.riffinePracticeRequest !== 'function') {
     self.postMessage({ type: 'result', id, response: { version: 1, error: { version: 1, code: 'host_failure', message: 'Practice worker has not loaded.' } } });
@@ -12,6 +14,8 @@ self.onmessage = (event) => {
 };
 (async () => {
   try {
+    // Editing remains available when optional compiled processing assets are absent.
+    try { const preview = await import('./preview-worker.mjs'); await preview.ready; self.riffinePreviewRun = preview.run; } catch { self.riffinePreviewRun = undefined; }
     const response = await fetch('./core.wasm');
     if (!response.ok) throw new Error('Shared practice core is missing. Run the browser build script.');
     const result = await WebAssembly.instantiate(await response.arrayBuffer(), go.importObject);

@@ -100,6 +100,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '22.x'
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.24.x'
+          cache: false
       - name: Activate pinned Emscripten 4.0.14
         run: |
           git clone https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/riffine-emsdk"
@@ -112,6 +116,9 @@ jobs:
           sh scripts/build-wasm-dsp-spike.sh
           sh scripts/build-browser-dsp.sh
           node scripts/check-browser-selection.mjs build/wasm-dsp-native/selection-probe > build/browser-dsp/metrics.json
+          sh scripts/build-browser-practice.sh
+          go run ./cmd/riffine tone --out build/browser-conformance.wav --seconds 1
+          node scripts/check-browser-preview.mjs > build/browser-dsp/preview.json
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -120,4 +127,5 @@ jobs:
             build/wasm-dsp/report.json
             build/wasm-dsp/metrics.json
             build/browser-dsp/metrics.json
+            build/browser-dsp/preview.json
           if-no-files-found: warn

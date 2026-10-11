@@ -94,12 +94,13 @@ type EventBatch struct {
 }
 
 type Service struct {
-	Resources  resource.Resources
-	Store      resource.Store
-	Decoder    audio.Decoder
-	Renderer   engine.Renderer
-	Previewer  engine.Previewer
-	LiveDevice LiveDeviceFactory
+	Resources       resource.Resources
+	Store           resource.Store
+	Decoder         audio.Decoder
+	Renderer        engine.Renderer
+	Previewer       engine.Previewer
+	SourcePreviewer engine.SourcePreviewer
+	LiveDevice      LiveDeviceFactory
 }
 
 func (s Service) check(ctx context.Context) error {
@@ -178,7 +179,7 @@ type Session struct {
 
 func (s *Session) snapshot() Snapshot {
 	snapshot := Snapshot{Version: APIVersion, Sequence: s.sequence, State: "ready", Revision: s.revision, Project: s.p.Clone(),
-		Capabilities: Capabilities{Formats: append([]string{}, s.service.Decoder.Formats()...), OfflineRender: s.service.Renderer != nil, StreamPreview: s.service.Previewer != nil}}
+		Capabilities: Capabilities{Formats: append([]string{}, s.service.Decoder.Formats()...), OfflineRender: s.service.Renderer != nil, StreamPreview: s.service.Previewer != nil || s.service.SourcePreviewer != nil}}
 	if s.live != nil {
 		transport := s.live.transport.Snapshot()
 		snapshot.Transport = &transport
@@ -421,14 +422,28 @@ func (s *Session) selection() (int64, int64) {
 func (s *Session) Preview(ctx context.Context) (engine.PreviewReport, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.service.Previewer == nil {
+	if s.service.Previewer == nil && s.service.SourcePreviewer == nil {
 		return engine.PreviewReport{}, failure(UnsupportedCapability, errors.New("streaming preview is unavailable"))
 	}
-	if err := s.verify(ctx, s.source); err != nil {
-		return engine.PreviewReport{}, err
-	}
 	start, end := s.selection()
-	report, err := s.service.Previewer.Preview(ctx, engine.PreviewRequest{Source: s.source, StartFrame: start, EndFrame: end, Speed: s.p.Settings.Speed, Pitch: s.p.Settings.Pitch})
+	request := engine.PreviewRequest{Source: s.source, StartFrame: start, EndFrame: end, Speed: s.p.Settings.Speed, Pitch: s.p.Settings.Pitch}
+	var report engine.PreviewReport
+	var err error
+	if s.service.SourcePreviewer != nil {
+		var reader resource.Reader
+		var info audio.Info
+		reader, info, err = s.openVerifiedAudio(ctx, s.source)
+		if err != nil {
+			return report, err
+		}
+		defer reader.Close()
+		report, err = s.service.SourcePreviewer.PreviewSource(ctx, reader, info, request)
+	} else {
+		if err = s.verify(ctx, s.source); err != nil {
+			return report, err
+		}
+		report, err = s.service.Previewer.Preview(ctx, request)
+	}
 	if err != nil {
 		return engine.PreviewReport{}, failure(HostFailure, err)
 	}

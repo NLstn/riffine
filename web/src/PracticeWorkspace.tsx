@@ -12,6 +12,7 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
  const [snapshot, setSnapshot] = useState<Snapshot>();
  const [wave, setWave] = useState<WaveWindow>();
  const [busy, setBusy] = useState(false);
+ const [busyLabel, setBusyLabel] = useState('Working locally…');
  const [error, setError] = useState('');
  const [status, setStatus] = useState('Choose an original WAV and optionally a saved project.');
  const [start, setStart] = useState('0');
@@ -33,7 +34,7 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
   if (response.window) setWave(response.window);
   return response;
  };
- const run = async (action: () => Promise<void>) => { setBusy(true); setError(''); try { await action(); } catch (failure) { setError(String(failure instanceof Error ? failure.message : failure)); } finally { setBusy(false); } };
+ const run = async (action: () => Promise<void>, message = 'Working locally…') => { setBusy(true); setBusyLabel(message); setError(''); try { await action(); } catch (failure) { const message = String(failure instanceof Error ? failure.message : failure); setError(message); setStatus(message.startsWith('cancelled:') ? 'Operation cancelled.' : 'Operation could not finish.'); } finally { setBusy(false); } };
  const open = async (original: File, saved?: File) => {
   const client = facade.current;
   if (!client) return;
@@ -83,6 +84,12 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
   if (!facade.current || !snapshot) return;
   install(await facade.current.waveform(0, snapshot.project.track.audio.frames), false); setDetailView(false);
  });
+ const preview = () => run(async () => {
+  if (!facade.current?.preview || !snapshot) return;
+  setStatus('Previewing the saved selection once…');
+  const result = install(await facade.current.preview(snapshot));
+  setStatus(result.preview?.underrunFrames ? 'Selection preview finished with an audio interruption. You can try it again.' : 'Selection preview finished.');
+ }, 'Previewing the saved selection once…');
  const duration = snapshot ? snapshot.project.track.audio.frames / snapshot.project.track.audio.sampleRate : 0;
  const viewStart = wave?.requestedStart ?? 0;
  const viewEnd = wave?.requestedEnd ?? 1;
@@ -108,10 +115,10 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
   </div>
   <input className="visually-hidden" ref={sourceInput} type="file" accept=".wav,.wave,audio/wav" onChange={event => { chooseSource(event.target.files?.[0]); event.target.value = ''; }} />
   <input className="visually-hidden" ref={projectInput} type="file" accept=".json,application/json" onChange={event => { loadProject(event.target.files?.[0]); event.target.value = ''; }} />
-  {error && <p role="alert" className="practice-error">{error}</p>}<p role="status">{busy ? 'Reading local source…' : status}</p>
+  {error && <p role="alert" className="practice-error">{error}</p>}<p role="status">{busy ? busyLabel : status}</p>
   {snapshot && <>
-   <p className="practice-capability">{snapshot.capabilities.formats.join(', ')} · {duration.toFixed(3)} source seconds · Practice audio playback is unavailable in this browser adapter.</p>
-   <div className="practice-actions"><button type="button" disabled={!snapshot.capabilities.liveTransport || busy}>Play / pause</button><button type="button" disabled={busy} onClick={() => void overview()}>Full overview</button><button type="button" disabled={busy} onClick={() => void zoom()}>Exact selection zoom</button></div>
+   <p className="practice-capability">{snapshot.capabilities.formats.join(', ')} · {duration.toFixed(3)} source seconds · {snapshot.capabilities.streamPreview ? 'Preview the saved selection once at the accepted speed and pitch.' : 'Audio preview is unavailable; this browser needs the processing build and audio support.'} Live loop playback is unavailable.</p>
+   <div className="practice-actions"><button type="button" disabled={!snapshot.capabilities.streamPreview || !facade.current?.preview || busy} onClick={() => void preview()}>Preview selection</button><button type="button" disabled={!snapshot.capabilities.liveTransport || busy}>Play / pause</button><button type="button" disabled={busy} onClick={() => void overview()}>Full overview</button><button type="button" disabled={busy} onClick={() => void zoom()}>Exact selection zoom</button></div>
    {wave && <><svg className="practice-waveform" viewBox="0 0 1000 160" role="img" aria-label={`${detailView ? 'Exact selection' : 'Track overview'} waveform; click sets selection start, Shift-click sets end`} onClick={selectInView}>
     <rect x="0" y="0" width="1000" height="160" fill="transparent" />
     {wave.cells.map((cell, index) => cell.channels.map((peak, channel) => <line key={`${index}-${channel}`} x1={(cell.startFrame - viewStart) / viewLength * 1000} x2={(cell.startFrame - viewStart) / viewLength * 1000} y1={40 + channel * 80 - peak.max * 35} y2={40 + channel * 80 - peak.min * 35} stroke="currentColor" strokeWidth="2" />))}

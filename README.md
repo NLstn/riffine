@@ -165,3 +165,12 @@ phrase, speed/pitch, named loops, notes or markers. Download/reopen projects to
 keep edits. The browser adapter currently supports WAV PCM editing/waveforms;
 practice audio playback is explicitly unavailable. [Validation and remaining
 host work](docs/validation/browser-practice.md).
+
+
+Browser selection preview can use the shared C++ DSP through an AudioWorklet.
+With the existing Emscripten 4.0.14 SDK activated, run
+`sh scripts/build-browser-dsp.sh` as well as the browser core build, then open the
+practice workspace and choose **Preview selection**. It plays the accepted
+selection once at saved speed/pitch; live looping and practice counts remain
+unavailable. See [browser audio preview](docs/validation/browser-audio-preview.md)
+for run steps, host requirements, cancellation and validation evidence.

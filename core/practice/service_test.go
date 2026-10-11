@@ -544,3 +544,61 @@ func TestPracticePlanSessionRoundTrip(t *testing.T) {
 		t.Fatal("region removal left dangling plan")
 	}
 }
+
+type sourcePreviewRecorder struct {
+	host                    *memoryHost
+	calls, closeCountAtCall int
+	info                    audio.Info
+	request                 engine.PreviewRequest
+}
+
+func (p *sourcePreviewRecorder) PreviewSource(ctx context.Context, reader resource.Reader, info audio.Info, request engine.PreviewRequest) (engine.PreviewReport, error) {
+	p.calls++
+	p.closeCountAtCall = p.host.closed
+	p.info, p.request = info, request
+	stream, err := (audio.WAVDecoder{}).OpenVerifiedPCM(ctx, reader, info)
+	if err != nil {
+		return engine.PreviewReport{}, err
+	}
+	defer stream.Close()
+	if err := stream.SeekFrame(ctx, request.StartFrame); err != nil {
+		return engine.PreviewReport{}, err
+	}
+	samples := make([]float32, 512*info.Channels)
+	if _, err := stream.ReadFrames(ctx, samples); err != nil {
+		return engine.PreviewReport{}, err
+	}
+	frames := int64(math.Round(float64(request.EndFrame-request.StartFrame) / request.Speed))
+	return engine.PreviewReport{Version: 1, Channels: info.Channels, SampleRate: info.SampleRate, OutputFrames: frames, CopiedFrames: frames}, nil
+}
+func TestSourcePreviewBorrowsVerifiedReaderAndNeverCountsPlayback(t *testing.T) {
+	session, host, _ := newSession(t)
+	port := &sourcePreviewRecorder{host: host}
+	session.service.SourcePreviewer = port
+	loop := project.Loop{Enabled: true, Start: .25, End: .75}
+	dispatchLive(t, session, Command{Type: "set_loop", Loop: &loop})
+	speed, pitch := .75, 3.
+	dispatchLive(t, session, Command{Type: "set_parameters", Speed: &speed, Pitch: &pitch})
+	before := session.Snapshot()
+	opened := host.opened
+	report, err := session.Preview(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.OutputFrames != 32000 || port.calls != 1 || port.request.StartFrame != 12000 || port.request.EndFrame != 36000 || port.info.DataOffset == 0 || host.opened != opened+1 || host.closed != port.closeCountAtCall+1 {
+		t.Fatal("source preview ownership/coordinates differ")
+	}
+	if !reflect.DeepEqual(session.Snapshot(), before) {
+		t.Fatal("preview mutated project or sequence")
+	}
+	batch := session.DrainEvents()
+	if len(batch.Events) != 2 || batch.Events[0].Type != "session_changed" || batch.Events[1].Type != "session_changed" {
+		t.Fatal("preview produced playback events")
+	}
+	host.data["opaque:original"][50] ^= 1
+	_, err = session.Preview(context.Background())
+	errorCode(t, err, IdentityMismatch)
+	if port.calls != 1 {
+		t.Fatal("preview adapter received an unverified source")
+	}
+}

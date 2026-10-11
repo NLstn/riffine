@@ -10,6 +10,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/NLstn/riffine/core/engine"
 	"github.com/NLstn/riffine/core/practice"
 	"github.com/NLstn/riffine/core/project"
 	"github.com/NLstn/riffine/core/waveform"
@@ -29,12 +30,13 @@ type Request struct {
 	Bins       int             `json:"bins,omitempty"`
 }
 type Response struct {
-	Version  int                  `json:"version"`
-	Snapshot *practice.Snapshot   `json:"snapshot,omitempty"`
-	Events   *practice.EventBatch `json:"events,omitempty"`
-	Window   *waveform.Window     `json:"window,omitempty"`
-	Document string               `json:"document,omitempty"`
-	Error    *practice.Error      `json:"error,omitempty"`
+	Version  int                   `json:"version"`
+	Preview  *engine.PreviewReport `json:"preview,omitempty"`
+	Snapshot *practice.Snapshot    `json:"snapshot,omitempty"`
+	Events   *practice.EventBatch  `json:"events,omitempty"`
+	Window   *waveform.Window      `json:"window,omitempty"`
+	Document string                `json:"document,omitempty"`
+	Error    *practice.Error       `json:"error,omitempty"`
 }
 type Session struct {
 	mu      sync.Mutex
@@ -154,6 +156,12 @@ func (s *Session) Handle(ctx context.Context, data []byte) Response {
 		if err != nil {
 			return reject(err)
 		}
+	case "preview":
+		report, err := s.session.Preview(ctx)
+		if err != nil {
+			return reject(err)
+		}
+		response.Preview = &report
 	case "snapshot":
 	case "events":
 		batch := s.session.DrainEvents()

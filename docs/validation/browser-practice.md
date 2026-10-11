@@ -26,8 +26,11 @@ You can also open an integer PCM WAV from the existing library or the workspace'
 file picker. Library preview controls are disabled while practice is open, so
 there is no independent HTMLAudioElement practice state. This adapter currently
 advertises WAV PCM, without live practice transport or offline DSP rendering.
-The practice play button is disabled and the limitation is visible. FLAC/MP3
-practice decoding, live AudioWorklet/DSP, desktop binding, autosave storage and
+The practice live play button is disabled and the limitation is visible. An
+optional **Preview selection** button plays one accepted range using shared C++
+DSP and an AudioWorklet when the processing module is built and host audio is
+available. See [browser audio preview](browser-audio-preview.md). FLAC/MP3
+practice decoding, live transport/presentation acknowledgements, desktop binding, autosave storage and
 hand-free transport controls remain in #15/#17/#20/#21/#26–28; these issues are
 not closed by this slice.
 
