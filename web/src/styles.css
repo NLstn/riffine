@@ -219,3 +219,18 @@ tbody tr:hover .track-number > span, .track-play-button.is-playing + span { disp
   .transport-controls .main-play-button { width: 27px; height: 27px; }
   .close-player-button { grid-column: 2; grid-row: 1; }
 }
+
+.practice-workspace { margin: 24px 0; padding: 24px; background: var(--surface, #fff); border: 1px solid #d6d9d5; border-radius: 16px; }
+.practice-heading, .practice-actions, .practice-form { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 16px 0; }
+.practice-heading { justify-content: space-between; }
+.practice-workspace h2 { margin: 0; }
+.practice-workspace button { border: 1px solid #9aa79d; background: #f1f5f0; color: #203b2b; border-radius: 7px; padding: 9px 12px; cursor: pointer; }
+.practice-workspace button:disabled { opacity: .5; cursor: default; }
+.practice-workspace :focus-visible, .more-cell button:focus-visible { outline: 3px solid #356c50; outline-offset: 3px; }
+.practice-form label, .practice-notes { display: grid; gap: 6px; font-size: 13px; }
+.practice-form input, .practice-notes textarea { border: 1px solid #9aa79d; border-radius: 6px; padding: 8px; background: white; color: #203b2b; }
+.practice-notes textarea { min-height: 80px; resize: vertical; }
+.practice-waveform { display: block; width: 100%; height: 160px; color: #356c50; background: #edf2eb; border-radius: 8px; cursor: crosshair; }
+.practice-error { color: #8b2323; }
+.practice-capability { font-size: 13px; color: #546253; }
+.practice-regions { display: flex; flex-wrap: wrap; list-style: none; gap: 10px; padding: 0; }

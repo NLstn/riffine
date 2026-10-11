@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"sync"
 
+	"github.com/NLstn/riffine/adapters/binding"
 	"github.com/NLstn/riffine/core/audio"
 	"github.com/NLstn/riffine/core/engine"
 	"github.com/NLstn/riffine/core/practice"
@@ -52,6 +53,7 @@ type Step struct {
 	Error    practice.ErrorCode `json:"error,omitempty"`
 }
 type Report struct {
+	Binding              []binding.Response          `json:"binding"`
 	WaveformDetail       waveform.Window             `json:"waveformDetail"`
 	Waveform             waveform.Window             `json:"waveform"`
 	PCMAndLibrary        bool                        `json:"pcmAndLibrary"`
@@ -121,6 +123,11 @@ func execute(input string) (r Report, err error) {
 	service := practice.Service{Resources: host, Store: host, Decoder: audio.WAVDecoder{}, Renderer: renderer}
 	ctx := context.Background()
 	if err = pcmLibraryConformance(ctx, host); err != nil {
+		return r, err
+	}
+
+	r.Binding, err = bindingConformance(ctx, host, f)
+	if err != nil {
 		return r, err
 	}
 	r.PCMAndLibrary = true
@@ -359,4 +366,37 @@ func (d *fakeOutput) DrainAcknowledgements(ctx context.Context, limit int) ([]en
 	result := []engine.OutputAcknowledgement{*d.pending}
 	d.pending = nil
 	return result, nil
+}
+
+// The browser bridge and native fixture execute the same full request/response
+// trace. Filename locators are presentation/storage adapter data, not identities.
+type fileMemory struct{ *memory }
+
+func (h fileMemory) Reference(ctx context.Context, _, _ string) (string, error) {
+	return h.name, ctx.Err()
+}
+func (h fileMemory) Resolve(ctx context.Context, _, _ string) (string, error) {
+	return "source", ctx.Err()
+}
+func bindingConformance(ctx context.Context, host *memory, f fixture) ([]binding.Response, error) {
+	bridge := binding.New(practice.Service{Resources: fileMemory{host}, Store: host, Decoder: audio.WAVDecoder{}})
+	defer bridge.Close()
+	requests := []binding.Request{{Version: 1, Type: "import", Source: "source", Document: "project"}}
+	for _, step := range f.Steps {
+		data, err := json.Marshal(step.Command)
+		if err != nil {
+			return nil, err
+		}
+		requests = append(requests, binding.Request{Version: 1, Type: "command", Command: data})
+	}
+	requests = append(requests, binding.Request{Version: 1, Type: "waveform", StartFrame: f.Render.StartFrame, EndFrame: f.Render.EndFrame, Bins: 7}, binding.Request{Version: 1, Type: "detail", StartFrame: 255, EndFrame: 258, Bins: 3}, binding.Request{Version: 1, Type: "events"}, binding.Request{Version: 1, Type: "export"})
+	trace := make([]binding.Response, 0, len(requests))
+	for _, request := range requests {
+		data, err := json.Marshal(request)
+		if err != nil {
+			return nil, err
+		}
+		trace = append(trace, bridge.Handle(ctx, data))
+	}
+	return trace, nil
 }

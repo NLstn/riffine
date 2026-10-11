@@ -212,3 +212,14 @@ views use the cached pyramid. Cancellation/failure after decoding starts require
 closing/reopening the handle; rejected requests do not touch the decoder. MP3
 seeking currently replays the source prefix with fixed memory; CPU grows with
 position. [Validation and ownership](validation/waveform-detail.md).
+
+### Local worker bindings
+
+`adapters/binding.Session` exposes a version-1 bounded JSON bridge around an owned
+core session. Operations import/open, dispatch a strict shared command, request
+retained overview/detail windows, drain events, inspect snapshots and export
+portable project JSON. Platform adapters provide resource/store ports; no product
+rules move into JavaScript. Close releases retained waveform resources. The browser
+worker uses selected immutable Files and advertises only its actual WAV capability;
+failed/cancelled session replacement preserves the previous active session.
+See [browser binding evidence](validation/browser-practice.md).
