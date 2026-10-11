@@ -47,3 +47,11 @@ Checks:
 Client rendering/gestures and production browser/mobile decoder/cache adapters
 remain in #19/#26–28. This slice supplies the shared precise-window API, not those
 clients or physical-device validation.
+
+Windows generated-cache publication uses `SetFileInformationByHandle` with
+`FileRenameInfoEx` and POSIX replacement flags, preserving existing complete-file
+readers while subsequent opens see the new name continuously. Unsupported
+filesystems return an explicit cache diagnostic and the computed pyramid remains
+usable. This does not change revision-protected project save behavior. See
+[Microsoft's rename semantics](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information)
+and [file information classes](https://learn.microsoft.com/en-us/windows/win32/api/minwinbase/ne-minwinbase-file_info_by_handle_class).
