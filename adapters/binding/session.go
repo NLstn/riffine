@@ -136,6 +136,24 @@ func (s *Session) Handle(ctx context.Context, data []byte) Response {
 		if err != nil {
 			return reject(err)
 		}
+	case "attach_transport":
+		if err := s.session.AttachTransport(ctx); err != nil {
+			snapshot := s.session.Snapshot()
+			response.Snapshot = &snapshot
+			return reject(err)
+		}
+	case "detach_transport":
+		if err := s.session.DetachTransport(); err != nil {
+			snapshot := s.session.Snapshot()
+			response.Snapshot = &snapshot
+			return reject(err)
+		}
+	case "poll_transport":
+		snapshot, err := s.session.PollTransport(ctx)
+		response.Snapshot = &snapshot
+		if err != nil {
+			return reject(err)
+		}
 	case "snapshot":
 	case "events":
 		batch := s.session.DrainEvents()
@@ -197,10 +215,13 @@ func (s *Session) Close() error {
 	}
 	s.closed = true
 	s.pyramid = nil
+	var err error
 	if s.detail != nil {
-		err := s.detail.Close()
+		err = s.detail.Close()
 		s.detail = nil
-		return err
 	}
-	return nil
+	if s.session != nil {
+		err = errors.Join(err, s.session.CloseTransport())
+	}
+	return err
 }

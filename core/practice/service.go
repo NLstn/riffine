@@ -69,19 +69,22 @@ type Command struct {
 	Loop          *project.Loop           `json:"loop,omitempty"`
 	Annotations   *project.Annotations    `json:"annotations,omitempty"`
 	PracticePlans *[]project.PracticePlan `json:"practicePlans,omitempty"`
+	Position      *int64                  `json:"position,omitempty"`
 }
 type Snapshot struct {
-	Version      int             `json:"version"`
-	Sequence     uint64          `json:"sequence"`
-	State        string          `json:"state"`
-	Project      project.Project `json:"project"`
-	Capabilities Capabilities    `json:"capabilities"`
-	Revision     string          `json:"revision,omitempty"`
+	Version      int                       `json:"version"`
+	Sequence     uint64                    `json:"sequence"`
+	State        string                    `json:"state"`
+	Project      project.Project           `json:"project"`
+	Capabilities Capabilities              `json:"capabilities"`
+	Revision     string                    `json:"revision,omitempty"`
+	Transport    *engine.TransportSnapshot `json:"transport,omitempty"`
 }
 type Event struct {
-	Version  int    `json:"version"`
-	Sequence uint64 `json:"sequence"`
-	Type     string `json:"type"`
+	Version   int                    `json:"version"`
+	Sequence  uint64                 `json:"sequence"`
+	Type      string                 `json:"type"`
+	Transport *engine.TransportEvent `json:"transport,omitempty"`
 }
 type EventBatch struct {
 	Version  int      `json:"version"`
@@ -91,11 +94,12 @@ type EventBatch struct {
 }
 
 type Service struct {
-	Resources resource.Resources
-	Store     resource.Store
-	Decoder   audio.Decoder
-	Renderer  engine.Renderer
-	Previewer engine.Previewer
+	Resources  resource.Resources
+	Store      resource.Store
+	Decoder    audio.Decoder
+	Renderer   engine.Renderer
+	Previewer  engine.Previewer
+	LiveDevice LiveDeviceFactory
 }
 
 func (s Service) check(ctx context.Context) error {
@@ -169,15 +173,25 @@ type Session struct {
 	events           [EventCapacity]Event
 	head, count      int
 	dropped          uint64
+	live             *liveAttachment
 }
 
 func (s *Session) snapshot() Snapshot {
-	return Snapshot{Version: APIVersion, Sequence: s.sequence, State: "ready", Revision: s.revision, Project: s.p.Clone(),
+	snapshot := Snapshot{Version: APIVersion, Sequence: s.sequence, State: "ready", Revision: s.revision, Project: s.p.Clone(),
 		Capabilities: Capabilities{Formats: append([]string{}, s.service.Decoder.Formats()...), OfflineRender: s.service.Renderer != nil, StreamPreview: s.service.Previewer != nil}}
+	if s.live != nil {
+		transport := s.live.transport.Snapshot()
+		snapshot.Transport = &transport
+		snapshot.State = transport.State
+		snapshot.Capabilities.LiveTransport = true
+	}
+	return snapshot
 }
 func (s *Session) Snapshot() Snapshot { s.mu.Lock(); defer s.mu.Unlock(); return s.snapshot() }
 func (s *Session) emit(kind string) {
-	e := Event{Version: APIVersion, Sequence: s.sequence, Type: kind}
+	s.emitEvent(Event{Version: APIVersion, Sequence: s.sequence, Type: kind})
+}
+func (s *Session) emitEvent(e Event) {
 	if s.count == EventCapacity {
 		s.events[s.head] = e
 		s.head = (s.head + 1) % EventCapacity
@@ -209,10 +223,13 @@ func (s *Session) Dispatch(ctx context.Context, c Command) (Snapshot, error) {
 	if c.Version != APIVersion {
 		return reject(UnsupportedVersion, "unsupported command version")
 	}
-	if c.Sequence == 0 || c.Sequence != s.sequence+1 {
+	if c.Sequence == 0 || s.sequence == math.MaxUint64 || c.Sequence != s.sequence+1 {
 		return reject(OutOfOrder, "command sequence must be the next successful sequence")
 	}
 	p := s.p
+	if c.Position != nil && c.Type != "seek" {
+		return reject(InvalidCommand, "position is only valid for seek")
+	}
 	switch c.Type {
 	case "set_parameters":
 		if c.PracticePlans != nil || c.Annotations != nil || c.Loop != nil || (c.Speed == nil && c.Pitch == nil) {
@@ -239,6 +256,13 @@ func (s *Session) Dispatch(ctx context.Context, c Command) (Snapshot, error) {
 			return reject(InvalidCommand, "set_practice_plans requires practicePlans only")
 		}
 		p.PracticePlans = project.ClonePlans(*c.PracticePlans)
+	case "play", "pause", "stop", "restart", "recover", "seek":
+		if c.PracticePlans != nil || c.Annotations != nil || c.Loop != nil || c.Speed != nil || c.Pitch != nil || (c.Type == "seek") != (c.Position != nil) {
+			return reject(InvalidCommand, "transport command has unexpected or missing fields")
+		}
+		if s.live == nil {
+			return reject(UnsupportedCapability, "live transport is unavailable")
+		}
 	default:
 		return reject(UnsupportedCapability, fmt.Sprintf("unsupported command %q", c.Type))
 	}
@@ -248,8 +272,18 @@ func (s *Session) Dispatch(ctx context.Context, c Command) (Snapshot, error) {
 	if err := ctx.Err(); err != nil {
 		return s.snapshot(), failure(Cancelled, err)
 	}
+	if s.live != nil && (c.Type == "set_parameters" || c.Type == "set_loop" || c.Type == "play" || c.Type == "pause" || c.Type == "stop" || c.Type == "restart" || c.Type == "recover" || c.Type == "seek") {
+		if err := s.dispatchTransport(ctx, c, p); err != nil {
+			return s.snapshot(), err
+		}
+	}
 	s.p, s.sequence = p, c.Sequence
-	s.emit("session_changed")
+	s.collectTransportEvents()
+	if c.Type == "set_parameters" || c.Type == "set_loop" || c.Type == "set_annotations" || c.Type == "set_practice_plans" {
+		s.emit("session_changed")
+	} else {
+		s.emit("transport_changed")
+	}
 	return s.snapshot(), nil
 }
 func (s *Session) SaveAs(ctx context.Context, destination string) error {
@@ -274,23 +308,27 @@ func (s *Session) SaveAs(ctx context.Context, destination string) error {
 	return nil
 }
 func (s *Session) openVerified(ctx context.Context, source string) (resource.Reader, error) {
+	r, _, err := s.openVerifiedAudio(ctx, source)
+	return r, err
+}
+func (s *Session) openVerifiedAudio(ctx context.Context, source string) (resource.Reader, audio.Info, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, failure(Cancelled, err)
+		return nil, audio.Info{}, failure(Cancelled, err)
 	}
 	r, err := s.service.Resources.Open(ctx, source)
 	if err != nil {
-		return nil, failure(ResourceUnavailable, err)
+		return nil, audio.Info{}, failure(ResourceUnavailable, err)
 	}
-	i, err := s.service.Decoder.Inspect(ctx, r)
+	info, err := s.service.Decoder.Inspect(ctx, r)
 	if err != nil {
 		r.Close()
-		return nil, failure(ResourceUnavailable, err)
+		return nil, audio.Info{}, failure(ResourceUnavailable, err)
 	}
-	if err = s.p.VerifyIdentity(i); err != nil {
+	if err = s.p.VerifyIdentity(info); err != nil {
 		r.Close()
-		return nil, failure(IdentityMismatch, err)
+		return nil, audio.Info{}, failure(IdentityMismatch, err)
 	}
-	return r, nil
+	return r, info, nil
 }
 func (s *Session) verify(ctx context.Context, source string) error {
 	r, err := s.openVerified(ctx, source)
@@ -323,8 +361,18 @@ func (s *Session) Relink(ctx context.Context, source string) error {
 	if err := ctx.Err(); err != nil {
 		return failure(Cancelled, err)
 	}
+	if s.sequence == math.MaxUint64 {
+		return failure(OutOfOrder, errors.New("session sequence exhausted"))
+	}
+	hadTransport := s.live != nil
+	if err := s.detachTransport(); err != nil {
+		return err
+	}
 	s.p.Track.Path, s.source = reference, source
 	s.sequence++
+	if hadTransport {
+		s.emit("transport_detached")
+	}
 	s.emit("source_relinked")
 	return nil
 }
@@ -369,7 +417,7 @@ func (s *Session) selection() (int64, int64) {
 
 // Preview streams one verified selection at fixed settings. It neither repeats
 // an enabled loop nor mutates state/sequences/events. Cancellation uses context.
-// Live transport stays unavailable until shared control/mapping are implemented.
+// Live transport requires a separately attached presentation-aware device.
 func (s *Session) Preview(ctx context.Context) (engine.PreviewReport, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -276,3 +276,32 @@ func TestTransportBoundedEventOverflow(t *testing.T) {
 		t.Fatal("lost accepted completions")
 	}
 }
+
+// Reset succeeds but Start fails after Dispatch has installed the next config.
+// The returned snapshot must reflect the failure already visible via Snapshot.
+type startFailureDevice struct{ transportFake }
+
+func (*startFailureDevice) Start(context.Context) error { return errors.New("start failed") }
+func TestFailedDispatchReturnsCurrentErrorSnapshot(t *testing.T) {
+	device := &startFailureDevice{}
+	transport, err := NewTransport(device)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = transport.Load(context.Background(), TransportConfig{Source: "source", Frames: 48000, SampleRate: 48000, OutputRate: 48000, Speed: 1}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := transport.Dispatch(context.Background(), TransportCommand{Version: 1, Sequence: 1, Type: "play"})
+	if err == nil || got.State != "error" || got.Error == "" || got.Sequence != 0 || got != transport.Snapshot() {
+		t.Fatalf("stale failure snapshot: %+v %v", got, err)
+	}
+}
+func TestFailedPollReturnsCurrentErrorSnapshot(t *testing.T) {
+	transport, device := setupTransport(t)
+	command(t, transport, "play", nil)
+	device.failure = errors.New("device acknowledgement failure")
+	got, err := transport.Poll(context.Background())
+	if err == nil || got.State != "error" || got.Error == "" || got != transport.Snapshot() {
+		t.Fatalf("stale poll snapshot: %+v %v", got, err)
+	}
+}

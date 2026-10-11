@@ -53,6 +53,7 @@ type Step struct {
 	Error    practice.ErrorCode `json:"error,omitempty"`
 }
 type Report struct {
+	LiveBinding          []binding.Response          `json:"liveBinding"`
 	Binding              []binding.Response          `json:"binding"`
 	WaveformDetail       waveform.Window             `json:"waveformDetail"`
 	Waveform             waveform.Window             `json:"waveform"`
@@ -127,6 +128,10 @@ func execute(input string) (r Report, err error) {
 	}
 
 	r.Binding, err = bindingConformance(ctx, host, f)
+	if err != nil {
+		return r, err
+	}
+	r.LiveBinding, err = liveBindingConformance(ctx, host, f)
 	if err != nil {
 		return r, err
 	}
