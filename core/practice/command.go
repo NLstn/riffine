@@ -7,7 +7,7 @@ import (
 	"io"
 )
 
-const MaxCommandBytes = 4096
+const MaxCommandBytes = 1 << 20
 
 // DecodeCommand is the shared JSON entry point for bindings. It rejects unknown
 // fields, trailing data and oversized messages before dispatch. Project schema
@@ -18,7 +18,7 @@ func DecodeCommand(r io.Reader) (Command, error) {
 		return Command{}, failure(InvalidCommand, err)
 	}
 	if len(b) > MaxCommandBytes {
-		return Command{}, failure(InvalidCommand, errors.New("command exceeds 4 KiB"))
+		return Command{}, failure(InvalidCommand, errors.New("command exceeds 1 MiB"))
 	}
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()

@@ -51,19 +51,20 @@ type Step struct {
 	Error    practice.ErrorCode `json:"error,omitempty"`
 }
 type Report struct {
-	Transport         TransportReport             `json:"transport"`
-	Version           int                         `json:"version"`
-	OK                bool                        `json:"ok"`
-	Error             string                      `json:"error,omitempty"`
-	Steps             []Step                      `json:"steps"`
-	Events            []practice.Event            `json:"events"`
-	Project           json.RawMessage             `json:"project"`
-	Cancellation      bool                        `json:"cancellation"`
-	ResourceOwnership bool                        `json:"resourceOwnership"`
-	Render            engine.RenderRequest        `json:"render"`
-	LoopCompletion    *engine.TraversalCompletion `json:"loopCompletion"`
-	DuplicateIgnored  bool                        `json:"duplicateIgnored"`
-	StaleIgnored      bool                        `json:"staleIgnored"`
+	Transport            TransportReport             `json:"transport"`
+	AnnotationsRoundTrip bool                        `json:"annotationsRoundTrip"`
+	Version              int                         `json:"version"`
+	OK                   bool                        `json:"ok"`
+	Error                string                      `json:"error,omitempty"`
+	Steps                []Step                      `json:"steps"`
+	Events               []practice.Event            `json:"events"`
+	Project              json.RawMessage             `json:"project"`
+	Cancellation         bool                        `json:"cancellation"`
+	ResourceOwnership    bool                        `json:"resourceOwnership"`
+	Render               engine.RenderRequest        `json:"render"`
+	LoopCompletion       *engine.TraversalCompletion `json:"loopCompletion"`
+	DuplicateIgnored     bool                        `json:"duplicateIgnored"`
+	StaleIgnored         bool                        `json:"staleIgnored"`
 }
 
 // Run always returns JSON. No filesystem, UI or device API is used by the harness.
@@ -138,6 +139,10 @@ func execute(input string) (r Report, err error) {
 	if batch.Dropped != 0 || !reflect.DeepEqual(r.Events, f.Events) {
 		return r, errors.New("event trace differs")
 	}
+	a := project.Annotations{Notes: "Shared host annotation fixture", Regions: []project.Region{{ID: "phrase", Label: "Phrase", Start: float64(f.Render.StartFrame) / float64(f.Audio.SampleRate), End: float64(f.Render.EndFrame) / float64(f.Audio.SampleRate)}}, Loops: []project.NamedLoop{{ID: "named", Label: "Repeat", RegionID: "phrase"}}, Bookmarks: []project.Bookmark{{ID: "resume", Position: float64(f.Render.StartFrame) / float64(f.Audio.SampleRate)}}}
+	if _, err = session.Dispatch(ctx, practice.Command{Version: 1, Sequence: session.Snapshot().Sequence + 1, Type: "set_annotations", Annotations: &a}); err != nil {
+		return r, err
+	}
 	if err = session.SaveAs(ctx, "project"); err != nil {
 		return r, err
 	}
@@ -145,8 +150,12 @@ func execute(input string) (r Report, err error) {
 	if err != nil {
 		return r, err
 	}
-	if reopened.Snapshot().Project != session.Snapshot().Project {
+	if !reflect.DeepEqual(reopened.Snapshot().Project, session.Snapshot().Project) {
 		return r, errors.New("project round-trip differs")
+	}
+	r.AnnotationsRoundTrip = reflect.DeepEqual(reopened.Snapshot().Project.Annotations, a)
+	if !r.AnnotationsRoundTrip {
+		return r, errors.New("annotation round-trip differs")
 	}
 	r.Project = append([]byte(nil), host.data["project"]...)
 	cancelled, cancel := context.WithCancel(ctx)

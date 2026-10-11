@@ -3,6 +3,7 @@ package project
 import (
 	"bytes"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -26,13 +27,13 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := Decode(bytes.NewReader(b))
-	if err != nil || got != p {
+	if err != nil || !reflect.DeepEqual(got, p) {
 		t.Fatalf("round trip: %+v, %v", got, err)
 	}
 }
 func TestInvalidSettings(t *testing.T) {
 	base := fixture(t)
-	cases := []func(*Project){func(p *Project) { p.Version = 2 }, func(p *Project) { p.Settings.Speed = 0 }, func(p *Project) { p.Settings.Pitch = 13 }, func(p *Project) { p.Settings.Speed = math.NaN() }, func(p *Project) { p.Settings.Loop = Loop{true, .8, .2} }, func(p *Project) { p.Settings.Loop = Loop{true, 0, 2} }, func(p *Project) { p.Settings.Loop = Loop{true, .5, .5} }, func(p *Project) { p.Track.Audio.SHA256 = "bad" }}
+	cases := []func(*Project){func(p *Project) { p.Version = 99 }, func(p *Project) { p.Settings.Speed = 0 }, func(p *Project) { p.Settings.Pitch = 13 }, func(p *Project) { p.Settings.Speed = math.NaN() }, func(p *Project) { p.Settings.Loop = Loop{true, .8, .2} }, func(p *Project) { p.Settings.Loop = Loop{true, 0, 2} }, func(p *Project) { p.Settings.Loop = Loop{true, .5, .5} }, func(p *Project) { p.Track.Audio.SHA256 = "bad" }}
 	for i, mutate := range cases {
 		p := base
 		mutate(&p)

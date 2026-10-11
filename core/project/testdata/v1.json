@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "name": "generated-tone.wav",
+  "track": {"path": "tone.wav", "audio": {"sampleRate": 48000, "channels": 1, "bits": 16, "frames": 48000, "sha256": "abababababababababababababababababababababababababababababababab"}},
+  "settings": {"speed": 0.6, "pitch": 3, "loop": {"enabled": true, "start": 0.25, "end": 0.75}}
+}

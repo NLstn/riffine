@@ -93,3 +93,45 @@ func TestSilentStreamingPreviewCLI(t *testing.T) {
 		t.Fatal("CLI preview created a rendered WAV")
 	}
 }
+
+func TestAnnotatedProjectWorkflow(t *testing.T) {
+	dir := t.TempDir()
+	wav := filepath.Join(dir, "tone.wav")
+	document := filepath.Join(dir, "project.json")
+	annotationFile := filepath.Join(dir, "notes.json")
+	saved := filepath.Join(dir, "annotated.json")
+	run := func(args ...string) {
+		t.Helper()
+		var b bytes.Buffer
+		if e := Run(context.Background(), args, &b, &b); e != nil {
+			t.Fatal(args, e, b.String())
+		}
+	}
+	run("tone", "--out", wav, "--seconds", "1")
+	run("import", "--audio", wav, "--out", document)
+	original, _ := os.ReadFile(wav)
+	previous, _ := os.ReadFile(document)
+	if e := os.WriteFile(annotationFile, []byte(`{"notes":"Slow pickup","regions":[{"id":"intro","label":"Intro","start":0.1,"end":0.7}],"loops":[{"id":"repeat","label":"Intro","regionId":"intro"}],"bookmarks":[{"id":"tomorrow","label":"Resume","position":0.3}]}`), 0600); e != nil {
+		t.Fatal(e)
+	}
+	run("annotate", "--project", document, "--out", saved, "--annotations", annotationFile)
+	run("inspect", "--project", saved, "--verify")
+	service := practice.Service{Resources: filesystem.Host{}, Store: filesystem.Host{}, Decoder: audio.WAVDecoder{}}
+	session, e := service.Open(context.Background(), saved)
+	if e != nil {
+		t.Fatal(e)
+	}
+	p := session.Snapshot().Project
+	if p.Version != 2 || p.Annotations.Notes != "Slow pickup" || len(p.Annotations.Regions) != 1 || p.Annotations.Loops[0].RegionID != "intro" || p.Annotations.Bookmarks[0].Position != .3 {
+		t.Fatal(p)
+	}
+	after, _ := os.ReadFile(wav)
+	oldAfter, _ := os.ReadFile(document)
+	if !bytes.Equal(after, original) || !bytes.Equal(previous, oldAfter) {
+		t.Fatal("annotation changed source or original project")
+	}
+	var out bytes.Buffer
+	if e = Run(context.Background(), []string{"annotate", "--project", document, "--out", saved, "--annotations", annotationFile}, &out, &out); e == nil {
+		t.Fatal("overwrote existing annotated project")
+	}
+}

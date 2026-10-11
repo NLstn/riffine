@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,6 +26,7 @@ const Help = `Riffine — local guitar practice core (working name)
   riffine set      --project song.riffine.json --out slow.riffine.json [--speed 0.75 --pitch -2]
   riffine loop     --project slow.riffine.json --out loop.riffine.json --start 1 --end 3 [--enabled=true]
   riffine relink   --project song.riffine.json --audio relocated.wav --out relinked.riffine.json
+  riffine annotate --project song.riffine.json --out annotated.riffine.json --annotations notes.json
   riffine waveform --project song.riffine.json [--bins 1000 --out song.peaks.json]
   riffine render   --project song.riffine.json --out practice.wav
   riffine play     --project song.riffine.json
@@ -46,7 +48,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 	command := args[0]
 	f := flag.NewFlagSet(command, flag.ContinueOnError)
 	f.SetOutput(errOut)
-	var source, dest, proj string
+	var source, dest, proj, annotationFile string
 	var verify, silent bool
 	var speed, pitch, start, end, seconds, hz float64
 	var enabled bool
@@ -72,6 +74,10 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 		f.Float64Var(&start, "start", 0, "source seconds")
 		f.Float64Var(&end, "end", 0, "source seconds")
 		f.BoolVar(&enabled, "enabled", true, "repeat selected region")
+	case "annotate":
+		f.StringVar(&proj, "project", "", "existing project")
+		f.StringVar(&dest, "out", "", "new annotated project")
+		f.StringVar(&annotationFile, "annotations", "", "portable annotations JSON file")
 	case "waveform":
 		f.StringVar(&proj, "project", "", "project path")
 		f.StringVar(&dest, "out", "", "optional output JSON (default stdout)")
@@ -107,7 +113,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 		return errors.New("--project is required")
 	}
 	switch command {
-	case "tone", "import", "relink", "set", "loop", "render":
+	case "tone", "import", "relink", "set", "loop", "render", "annotate":
 		if dest == "" {
 			return errors.New("--out is required")
 		}
@@ -161,6 +167,19 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 			}
 		}
 		return writeJSON(p)
+	case "annotate":
+		if annotationFile == "" {
+			return errors.New("--annotations is required")
+		}
+		b, e := service.Store.Read(ctx, annotationFile, project.MaxDocumentBytes)
+		if e != nil {
+			return e
+		}
+		a, e := project.DecodeAnnotations(bytes.NewReader(b))
+		if e != nil {
+			return e
+		}
+		change = &practice.Command{Version: practice.APIVersion, Sequence: 1, Type: "set_annotations", Annotations: &a}
 	case "set":
 		if !provided["speed"] && !provided["pitch"] {
 			return errors.New("supply --speed and/or --pitch")
