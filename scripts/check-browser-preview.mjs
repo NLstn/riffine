@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { Worker } from 'node:worker_threads';
 import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { createPresentationTimeline, PresentationReader } from '../web/public/practice/presentation-timeline.mjs';
 import { createOutputQueue, OutputWriter, QueueState } from '../web/public/practice/output-queue.mjs';
 
 let Processor;
@@ -31,14 +32,19 @@ let sequence = 0;
 const command = async fields => { const response = requireResponse(await call({ type: 'command', command: { version: 1, sequence: sequence + 1, ...fields } })); sequence = response.snapshot.sequence; return response; };
 async function preview(cancelAfter = 0) {
  const queue = createOutputQueue(1), writer = new OutputWriter(queue);
- const processor = new Processor({ processorOptions: { queue } });
+ const timeline = createPresentationTimeline(), presentation = new PresentationReader(timeline, 48000);
+ const processor = new Processor({ processorOptions: { queue, timeline } });
+ let contextFrame = 0, presented = 0;
  const channel = new Float32Array(128), graph = [[channel]], input = [];
  let finished = false, message, failed, cancelled = false, measured = 0, crossings = 0, previous = 0, copied = 0;
  const response = call({ type: 'preview' }, { queue });
  void response.then(value => { finished = true; message = value; }, error => { finished = true; failed = error; });
  while (!finished) {
   const before = writer.snapshot().copiedFrames;
+  globalThis.currentFrame = contextFrame;
   processor.process(input, graph);
+  contextFrame += 128;
+  presented = presentation.observe({contextTime: Math.max(0, contextFrame - 256) / 48000, performanceTime: 1});
   const after = writer.snapshot().copiedFrames;
   for (let i = 0; i < after - before; i++) {
    assert(Number.isFinite(channel[i]));
@@ -55,6 +61,8 @@ async function preview(cancelAfter = 0) {
   const report = requireResponse(message).preview;
   assert.equal(report.outputFrames, 32000); assert.equal(report.copiedFrames, 32000); assert.equal(report.sampleRate, 48000);
   assert.equal(writer.snapshot().state, QueueState.done);
+  assert(presented < report.outputFrames); // callback completion precedes device tail
+  assert.equal(presentation.observe({contextTime: (contextFrame + 256) / 48000, performanceTime: 1}), report.outputFrames);
   assert(Math.abs(crossings * 48000 / measured - 440 * 2 ** (3 / 12)) < 4);
  }
  assert(message.maxRead <= 65536);
@@ -76,5 +84,5 @@ try {
  await preview(); // callbacks/cursors survive cancellation and release correctly
  const batch = requireResponse(await call({ type: 'events' })).events;
  assert.equal(batch.events.length, 2); assert(batch.events.every(event => event.type === 'session_changed'));
- console.log(JSON.stringify({ realGoWASMAndCPPWASM: true, sourceRange: [12000, 36000], outputFrames: 32000, pitch: 3, speed: .75, cancellationAndRetry: true, unchangedSessionSequence: sequence, noPlaybackCompletionEvents: true }, null, 2));
+ console.log(JSON.stringify({ realGoWASMAndCPPWASM: true, sourceRange: [12000, 36000], outputFrames: 32000, pitch: 3, speed: .75, cancellationAndRetry: true, unchangedSessionSequence: sequence, noPlaybackCompletionEvents: true, mappedPresentationTail: true }, null, 2));
 } finally { clearTimeout(timeout); await worker.terminate(); }

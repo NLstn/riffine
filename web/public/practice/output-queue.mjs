@@ -1,3 +1,4 @@
+import { PresentationWriter } from './presentation-timeline.mjs';
 // Device-buffer plumbing only. Queue consumption counts callback submission;
 // it must never be passed to the shared core as hardware presentation evidence.
 export const QueueState = Object.freeze({ primed: 0, running: 1, closed: 2, error: 3, done: 4 });
@@ -71,13 +72,14 @@ export class OutputWriter extends Queue {
 // updates fixed atomic integer fields: no allocation, locks, waits, messages,
 // decoding, DSP, logging, Go calls or practice policy on the audio callback.
 export class OutputConsumer extends Queue {
+ constructor(buffer, timeline) { super(buffer); this.timeline = timeline ? new PresentationWriter(timeline) : undefined; }
  addCounter(lowIndex, highIndex, increment) {
   const low = Atomics.load(this.header, lowIndex) >>> 0;
   const sum = low + increment;
   Atomics.store(this.header, lowIndex, sum | 0);
   if (sum >= uint32Range) Atomics.add(this.header, highIndex, 1);
  }
- process(outputs) {
+ process(outputs, contextFrame) {
   if (!outputs) { Atomics.store(this.header, stateIndex, QueueState.error); return false; }
   for (let c = 0; c < outputs.length; c++) outputs[c].fill(0);
   const state = Atomics.load(this.header, stateIndex);
@@ -90,10 +92,12 @@ export class OutputConsumer extends Queue {
   const available = (write - read) >>> 0;
   if (available > this.capacity) { Atomics.store(this.header, stateIndex, QueueState.error); return false; }
   const count = Math.min(available, quantum);
+  if (count && this.timeline && !this.timeline.canAppend(contextFrame, count)) { Atomics.store(this.header, stateIndex, QueueState.error); return false; }
   for (let frame = 0; frame < count; frame++) {
    const offset = ((read + frame) & this.mask) * this.channels;
    for (let c = 0; c < this.channels; c++) outputs[c][frame] = this.pcm[offset + c];
   }
+  if (count && this.timeline) this.timeline.append(contextFrame, count);
   Atomics.store(this.header, readIndex, (read + count) | 0);
   // Reload EOF after acquiring the producer's write cursor. A producer that
   // seals concurrently may have published more PCM; recheck before declaring done.
