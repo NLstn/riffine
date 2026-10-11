@@ -20,6 +20,7 @@ import (
 
 const Help = `Riffine — local guitar practice core (working name)
 
+  riffine scan     --sources local-files.json
   riffine tone     --out tone.wav [--seconds 3 --hz 440]
   riffine import   --audio song.wav --out song.riffine.json
   riffine inspect  --project song.riffine.json [--verify]
@@ -57,6 +58,8 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 	var enabled bool
 	var bins int
 	switch command {
+	case "scan":
+		f.StringVar(&source, "sources", "", "bounded JSON list of local source locators")
 	case "import", "relink":
 		f.StringVar(&source, "audio", "", "local source WAV")
 		f.StringVar(&dest, "out", "", "new project path")
@@ -121,7 +124,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 	}
 	provided := map[string]bool{}
 	f.Visit(func(x *flag.Flag) { provided[x.Name] = true })
-	if command != "doctor" && command != "tone" && command != "import" && proj == "" {
+	if command != "scan" && command != "doctor" && command != "tone" && command != "import" && proj == "" {
 		return errors.New("--project is required")
 	}
 	switch command {
@@ -146,6 +149,9 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 	}
 	if command == "tone" {
 		return filesystem.WriteTone(dest, seconds, hz, 48000, 1)
+	}
+	if command == "scan" {
+		return scanSources(ctx, source, out)
 	}
 	service := practice.Service{Resources: filesystem.Host{}, Store: filesystem.Host{}, Decoder: audio.WAVDecoder{}}
 	if command == "import" {

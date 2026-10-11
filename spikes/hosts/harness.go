@@ -51,6 +51,7 @@ type Step struct {
 	Error    practice.ErrorCode `json:"error,omitempty"`
 }
 type Report struct {
+	PCMAndLibrary        bool                        `json:"pcmAndLibrary"`
 	Ladder               LadderReport                `json:"ladder"`
 	Transport            TransportReport             `json:"transport"`
 	AnnotationsRoundTrip bool                        `json:"annotationsRoundTrip"`
@@ -116,6 +117,10 @@ func execute(input string) (r Report, err error) {
 	renderer := &recordingRenderer{}
 	service := practice.Service{Resources: host, Store: host, Decoder: audio.WAVDecoder{}, Renderer: renderer}
 	ctx := context.Background()
+	if err = pcmLibraryConformance(ctx, host); err != nil {
+		return r, err
+	}
+	r.PCMAndLibrary = true
 	session, err := service.Import(ctx, "source", "project")
 	if err != nil {
 		return r, err
