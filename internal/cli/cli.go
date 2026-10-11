@@ -31,6 +31,7 @@ const Help = `Riffine — local guitar practice core (working name)
   riffine plans    --project annotated.json --out planned.json --plans ladder.json
   riffine plan     --project planned.json --id ladder
   riffine annotate --project song.riffine.json --out annotated.riffine.json --annotations notes.json
+  riffine waveform-detail --project song.riffine.json --start-frame 1234 --end-frame 1240 [--bins 1000]
   riffine waveform-window --project song.riffine.json [--start-frame 0 --end-frame 48000 --bins 1000 --cache DIR]
   riffine waveform --project song.riffine.json [--bins 1000 --out song.peaks.json]
   riffine render   --project song.riffine.json --out practice.wav
@@ -95,9 +96,11 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 		f.StringVar(&proj, "project", "", "existing project")
 		f.StringVar(&dest, "out", "", "new annotated project")
 		f.StringVar(&annotationFile, "annotations", "", "portable annotations JSON file")
-	case "waveform-window":
+	case "waveform-window", "waveform-detail":
 		f.StringVar(&proj, "project", "", "project path")
-		f.StringVar(&cacheDir, "cache", "", "optional dedicated waveform cache directory")
+		if command == "waveform-window" {
+			f.StringVar(&cacheDir, "cache", "", "optional dedicated waveform cache directory")
+		}
 		f.Int64Var(&startFrame, "start-frame", 0, "first source frame")
 		f.Int64Var(&endFrame, "end-frame", 0, "exclusive source end frame (default full track)")
 		f.IntVar(&bins, "bins", 1000, "maximum returned peak cells, 1–4096")
@@ -259,6 +262,26 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 		if err = session.Relink(ctx, source); err != nil {
 			return err
 		}
+	case "waveform-detail":
+		if endFrame == 0 && !provided["end-frame"] {
+			endFrame = p.Track.Audio.Frames
+		}
+		if startFrame < 0 || endFrame <= startFrame || endFrame > p.Track.Audio.Frames || endFrame-startFrame > waveform.MaxDetailFrames || bins < 1 || bins > waveform.MaxWindowBins {
+			return errors.New("invalid detail range or bin limit; use waveform-window for wider views")
+		}
+		detail, e := session.OpenWaveformDetail(ctx)
+		if e != nil {
+			return e
+		}
+		defer detail.Close()
+		window, e := detail.Query(ctx, startFrame, endFrame, bins)
+		if e != nil {
+			return e
+		}
+		if e = detail.Close(); e != nil {
+			return e
+		}
+		return writeJSON(window)
 	case "waveform-window":
 		if endFrame == 0 && !provided["end-frame"] {
 			endFrame = p.Track.Audio.Frames

@@ -153,3 +153,5 @@ Project v4 records the source codec and optional source precision; v1–v3 PCM W
 projects migrate explicitly while keeping their settings, annotations and plans.
 See [native codec validation](docs/validation/native-codecs.md) for generated
 fixtures, supported operations and compressed seek limits.
+
+See [precise waveform detail](docs/validation/waveform-detail.md).

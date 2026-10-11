@@ -12,6 +12,7 @@ import (
 
 	"github.com/NLstn/riffine/adapters/filesystem"
 	"github.com/NLstn/riffine/core/engine"
+	"github.com/NLstn/riffine/core/waveform"
 )
 
 func TestNativeCompressedDecoder(t *testing.T) {
@@ -81,6 +82,33 @@ func TestNativeCompressedDecoder(t *testing.T) {
 			peaks, err := decoder.Peaks(ctx, r, 17)
 			if err != nil || peaks.Frames != 48000 || len(peaks.Channels) != 2 || len(peaks.Channels[0]) != 17 {
 				t.Fatal(peaks, err)
+			}
+
+			detailCursor, err := decoder.OpenPCM(ctx, r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			detail, err := waveform.NewDetail(info, detailCursor)
+			if err != nil {
+				detailCursor.Close()
+				t.Fatal(err)
+			}
+			for _, bounds := range [][2]int64{{1, 4}, {1151, 1154}, {12345, 12348}, {47997, 48000}} {
+				view, err := detail.Query(ctx, bounds[0], bounds[1], 4096)
+				if err != nil || view.FramesPerCell != 1 || len(view.Cells) != 3 {
+					t.Fatal(view, err)
+				}
+				for j, cell := range view.Cells {
+					for channel, peak := range cell.Channels {
+						expected := all[(int(bounds[0])+j)*2+channel]
+						if peak.Min != expected || peak.Max != expected {
+							t.Fatal("codec detail changed source samples", codec, cell, expected)
+						}
+					}
+				}
+			}
+			if err = detail.Close(); err != nil {
+				t.Fatal(err)
 			}
 			out := filepath.Join(t.TempDir(), "render.wav")
 			if err = adapter.Render(ctx, engine.RenderRequest{Source: path, Destination: out, StartFrame: 12000, EndFrame: 36000, Speed: .75, Pitch: 3}); err != nil {
