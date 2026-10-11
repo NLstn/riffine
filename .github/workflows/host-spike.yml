@@ -91,3 +91,30 @@ jobs:
             build/host-spike/android-amd64/metrics.json
             build/host-spike/android-amd64/emulator.log
           if-no-files-found: warn
+
+  cpp-wasm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+      - name: Activate pinned Emscripten 4.0.14
+        run: |
+          git clone https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/riffine-emsdk"
+          git -C "$RUNNER_TEMP/riffine-emsdk" checkout eff90ca04a3785f571a8095b3a42b63799cf384a
+          "$RUNNER_TEMP/riffine-emsdk/emsdk" install 4.0.14
+          "$RUNNER_TEMP/riffine-emsdk/emsdk" activate 4.0.14
+      - name: Compare native and worker WASM streaming DSP
+        run: |
+          source "$RUNNER_TEMP/riffine-emsdk/emsdk_env.sh"
+          sh scripts/build-wasm-dsp-spike.sh
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: cpp-wasm-streaming-evidence
+          path: |
+            build/wasm-dsp/report.json
+            build/wasm-dsp/metrics.json
+          if-no-files-found: warn

@@ -66,3 +66,14 @@ presentation-aware scheduling remain unverified. Simulator/emulator C processes
 establish C-to-Go control feasibility; they do not establish production client,
 signing, audio interruptions or long-session memory/quality acceptance. #13 remains
 open until those relevant architecture gates have evidence.
+
+
+## Passing CI runtime evidence
+
+Host feasibility run 38127493873 passed twenty complete calls on API 35 x86_64
+Android and iOS 26.4/iPhone 17 Pro simulator. Android first/median fixture calls
+were 6.489/4.459 ms (library 4,522,320 bytes); iOS first/median were
+45.857/1.679 ms (archive 7,321,008 bytes). Both reports matched native Go.
+The run retained report/metrics artifacts. These whole-fixture observations are
+not per-command budgets, real-device playback or lifecycle acceptance. Android
+arm64 was built in CI but remains unexecuted on physical hardware.

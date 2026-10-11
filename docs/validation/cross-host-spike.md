@@ -129,3 +129,10 @@ execution permissions. Actual iOS simulator C-to-Go runtime conformance now pass
 [mobile runtime evidence](mobile-runtime.md) for measurements, scripts, Android CI
 coverage and the remaining production/audio gates. The initial table above remains
 a record of the 2026-10-10 run rather than current coverage.
+
+## C++ WASM follow-up (2026-10-11)
+
+The earlier missing-toolchain observation is superseded by the executed native
+and WASM streaming C ABI probe in [wasm-streaming-dsp.md](wasm-streaming-dsp.md).
+It includes actual browser worker execution and twenty native/WASM comparisons;
+AudioWorklet playback and device timing remain separate acceptance gates.

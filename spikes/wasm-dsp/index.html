@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Riffine C++ streaming DSP feasibility</title>
+<style>
+body{font:16px system-ui;background:#101827;color:#e5ecf7;max-width:880px;margin:3rem auto;padding:0 1rem}
+button{font:inherit;padding:.65rem 1rem;background:#b8ead6;border:0;border-radius:8px;color:#15362b;cursor:pointer}
+pre{white-space:pre-wrap;background:#18253b;padding:1rem;border-radius:10px;font-size:13px}
+p{line-height:1.5;color:#bdcbe0}
+</style>
+<h1>C++ streaming DSP worker</h1>
+<p>This feasibility probe runs generated stereo signals through the same processing ABI as native audio. It reports speed/pitch, output counts and signal checks. Device playback and AudioWorklet timing are separate gates.</p>
+<button id="run">Run processing conformance</button>
+<pre id="result">Ready.</pre>
+<script type="module">
+const button=document.querySelector('#run'), output=document.querySelector('#result');
+button.onclick=()=>{
+ button.disabled=true;output.textContent='Running in a worker…';
+ const worker=new Worker('./browser-worker.mjs',{type:'module'});
+ const timeout=setTimeout(()=>{output.textContent='Worker timed out';worker.terminate();button.disabled=false;},120000);
+ worker.onmessage=event=>{clearTimeout(timeout);output.textContent=JSON.stringify(event.data,null,2);worker.terminate();button.disabled=false;};
+ worker.onerror=event=>{clearTimeout(timeout);output.textContent=event.message;worker.terminate();button.disabled=false;};
+ worker.postMessage({type:'run_fixture'});
+};
+</script>
