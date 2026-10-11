@@ -21,6 +21,22 @@ func (WAVDecoder) OpenPCM(ctx context.Context, source resource.Reader) (PCMStrea
 	if err != nil {
 		return nil, err
 	}
+	return (WAVDecoder{}).OpenVerifiedPCM(ctx, source, info)
+}
+
+// OpenVerifiedPCM borrows a stable reader already inspected by the caller. It
+// avoids rehashing the same source before worker-side playback. Info must be the
+// inspected in-memory value, including decoder offsets, never project JSON.
+func (WAVDecoder) OpenVerifiedPCM(ctx context.Context, source resource.Reader, info Info) (PCMStream, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := ValidateInfo(info); err != nil {
+		return nil, err
+	}
+	if source == nil || info.Encoding != "wav-pcm" || info.DataOffset < 12 || info.DataOffset > source.Size() || info.DataBytes != info.Frames*int64(info.Channels*info.Bits/8) || info.DataBytes > source.Size()-info.DataOffset {
+		return nil, errors.New("verified WAV metadata or resource bounds are invalid")
+	}
 	return &wavPCM{source: source, info: info, raw: make([]byte, PCMBlockFrames*info.Channels*info.Bits/8)}, nil
 }
 

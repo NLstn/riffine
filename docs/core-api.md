@@ -255,3 +255,22 @@ teardown, independent of command sequence limits. The JSON binding exposes
 `attach_transport`, `detach_transport`, `poll_transport`; closing the bridge
 releases both waveform and live handles. See the validation record for ownership,
 error and host-conformance evidence.
+
+
+## Preview from verified borrowed resources
+
+`Service.SourcePreviewer` optionally receives the source reader and inspected
+in-memory metadata from one identity verification. It must close its decoder
+cursor before returning, leaving Reader ownership to the session.
+`audio.WAVDecoder.OpenVerifiedPCM` uses that inspected value without rehashing;
+it checks metadata/resource bounds and requires decoder offsets, which are not
+present in project JSON. The caller must keep the borrowed resource stable.
+Existing path-based `Previewer` adapters retain their earlier behavior.
+
+The JSON binding `preview` operation returns `preview` diagnostics and a current
+snapshot. It does not consume a command sequence, repeat loops or issue playback
+completion events. The browser adapter reads at most 512 decoded source frames
+per worker request, runs shared C++ DSP, and feeds a fixed shared AudioWorklet
+queue. Production browser sessions can advertise `streamPreview` when that
+processing/output port is loaded, while `liveTransport` remains false. See
+[browser preview validation](validation/browser-audio-preview.md).

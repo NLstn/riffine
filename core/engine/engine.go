@@ -1,7 +1,11 @@
 // Package engine defines host-neutral offline processing and playback ports.
 package engine
 
-import "context"
+import (
+	"context"
+	"github.com/NLstn/riffine/core/audio"
+	"github.com/NLstn/riffine/core/resource"
+)
 
 // Source and Destination are opaque host resource handles, not core paths.
 // The native adapter interprets them as local paths. Ranges are source frames
@@ -51,4 +55,11 @@ type PreviewReport struct {
 
 type Previewer interface {
 	Preview(context.Context, PreviewRequest) (PreviewReport, error)
+}
+
+// SourcePreviewer borrows a stable, identity-verified reader and inspected
+// metadata for one preview. It closes its own decoder cursor before returning,
+// never the caller's reader. Calls run on a control worker, never an audio callback.
+type SourcePreviewer interface {
+	PreviewSource(context.Context, resource.Reader, audio.Info, PreviewRequest) (PreviewReport, error)
 }
