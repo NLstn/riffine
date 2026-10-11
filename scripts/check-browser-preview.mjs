@@ -30,11 +30,11 @@ const call = (request, extra = {}) => new Promise((resolve, reject) => {
 const requireResponse = message => { assert.equal(message.response.error, undefined); return message.response; };
 let sequence = 0;
 const command = async fields => { const response = requireResponse(await call({ type: 'command', command: { version: 1, sequence: sequence + 1, ...fields } })); sequence = response.snapshot.sequence; return response; };
-async function preview(cancelAfter = 0) {
+async function preview(cancelAfter = 0, pauseAfter = 0) {
  const queue = createOutputQueue(1), writer = new OutputWriter(queue);
  const timeline = createPresentationTimeline(), presentation = new PresentationReader(timeline, 48000);
  const processor = new Processor({ processorOptions: { queue, timeline } });
- let contextFrame = 0, presented = 0;
+ let contextFrame = 0, presented = 0, pauseRequested = false, pauseAt = 0, resumedPause = false;
  const channel = new Float32Array(128), graph = [[channel]], input = [];
  let finished = false, message, failed, cancelled = false, measured = 0, crossings = 0, previous = 0, copied = 0;
  const response = call({ type: 'preview' }, { queue });
@@ -52,6 +52,12 @@ async function preview(cancelAfter = 0) {
    previous = channel[i];
   }
   copied = after;
+  if (pauseAfter && copied >= pauseAfter && !pauseRequested) { writer.requestPause(); pauseRequested = true; }
+  if (writer.snapshot().state === QueueState.paused && !resumedPause) {
+   if (!pauseAt) pauseAt = performance.now();
+   assert.equal(copied, pauseAfter);
+   if (performance.now() - pauseAt > 11000) { assert.equal(finished, false); writer.resume(); resumedPause = true; }
+  }
   if (cancelAfter && copied >= cancelAfter && !cancelled) { worker.postMessage({ type: 'cancel' }); cancelled = true; }
   await delay(3);
  }
@@ -59,6 +65,7 @@ async function preview(cancelAfter = 0) {
  if (cancelAfter) { assert.equal(message.response.error.code, 'cancelled'); assert.equal(writer.snapshot().state, QueueState.closed); }
  else {
   const report = requireResponse(message).preview;
+  if (pauseAfter) assert.equal(resumedPause, true);
   assert.equal(report.outputFrames, 32000); assert.equal(report.copiedFrames, 32000); assert.equal(report.sampleRate, 48000);
   assert.equal(writer.snapshot().state, QueueState.done);
   assert(presented < report.outputFrames); // callback completion precedes device tail
@@ -79,10 +86,10 @@ try {
  await command({ type: 'set_loop', loop: { enabled: true, start: .25, end: .75 } });
  await command({ type: 'set_parameters', speed: .75, pitch: 3 });
  const missingQueue = await call({ type: 'preview' }); assert.equal(missingQueue.response.error.code, 'host_failure');
- await preview();
+ await preview(0, 512); // paused longer than the active-output 10-second stall guard
  await preview(512);
  await preview(); // callbacks/cursors survive cancellation and release correctly
  const batch = requireResponse(await call({ type: 'events' })).events;
  assert.equal(batch.events.length, 2); assert(batch.events.every(event => event.type === 'session_changed'));
- console.log(JSON.stringify({ realGoWASMAndCPPWASM: true, sourceRange: [12000, 36000], outputFrames: 32000, pitch: 3, speed: .75, cancellationAndRetry: true, unchangedSessionSequence: sequence, noPlaybackCompletionEvents: true, mappedPresentationTail: true }, null, 2));
+ console.log(JSON.stringify({ realGoWASMAndCPPWASM: true, sourceRange: [12000, 36000], outputFrames: 32000, pitch: 3, speed: .75, cancellationAndRetry: true, unchangedSessionSequence: sequence, noPlaybackCompletionEvents: true, mappedPresentationTail: true, pausedBeyondStallGuardAndResumed: true }, null, 2));
 } finally { clearTimeout(timeout); await worker.terminate(); }

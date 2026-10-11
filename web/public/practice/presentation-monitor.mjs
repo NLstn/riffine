@@ -16,7 +16,7 @@ export class PresentationMonitor {
    if (frames !== this.frames) { this.frames = frames; this.progressAt = performance.now(); }
    if (this.target !== undefined) {
     if (frames > this.target) throw new TimelineError('Presented audio exceeds the preview output.');
-    if (frames === this.target) { this.resolve?.(); this.resolve = undefined; this.reject = undefined; }
+    if (frames === this.target) { this.resolve?.(frames); this.resolve = undefined; this.reject = undefined; this.target = undefined; }
     else if (performance.now() - this.progressAt > 10000) throw new TimelineError('Audio output timestamp stopped advancing.');
    }
   } catch (error) {
@@ -25,10 +25,11 @@ export class PresentationMonitor {
    this.onError(this.failure);
   }
  }
- finish(expectedFrames) {
+ finish(expectedFrames) { return this.waitForFrames(expectedFrames); }
+ waitForFrames(expectedFrames) {
   if (this.closed) return Promise.reject(new TimelineError('Presentation monitor closed.'));
   if (this.failure) return Promise.reject(this.failure);
-  if (this.target !== undefined || !Number.isSafeInteger(expectedFrames) || expectedFrames < 1) return Promise.reject(new TimelineError('Invalid presentation completion target.'));
+  if (this.target !== undefined || !Number.isSafeInteger(expectedFrames) || expectedFrames < 0) return Promise.reject(new TimelineError('Invalid presentation completion target.'));
   this.target = expectedFrames; this.progressAt = performance.now();
   const done = new Promise((resolve, reject) => { this.resolve = resolve; this.reject = reject; });
   this.sample();
