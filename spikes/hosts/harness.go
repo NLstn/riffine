@@ -18,6 +18,7 @@ import (
 	"github.com/NLstn/riffine/core/practice"
 	"github.com/NLstn/riffine/core/project"
 	"github.com/NLstn/riffine/core/resource"
+	"github.com/NLstn/riffine/core/waveform"
 )
 
 const MaxFixtureBytes = 1 << 20
@@ -51,6 +52,7 @@ type Step struct {
 	Error    practice.ErrorCode `json:"error,omitempty"`
 }
 type Report struct {
+	Waveform             waveform.Window             `json:"waveform"`
 	PCMAndLibrary        bool                        `json:"pcmAndLibrary"`
 	Ladder               LadderReport                `json:"ladder"`
 	Transport            TransportReport             `json:"transport"`
@@ -124,6 +126,17 @@ func execute(input string) (r Report, err error) {
 	session, err := service.Import(ctx, "source", "project")
 	if err != nil {
 		return r, err
+	}
+	wave, waveErr := session.OpenWaveform(ctx, nil, nil)
+	if waveErr != nil {
+		return r, waveErr
+	}
+	r.Waveform, waveErr = wave.Pyramid.Query(ctx, f.Render.StartFrame, f.Render.EndFrame, 7)
+	if waveErr != nil {
+		return r, waveErr
+	}
+	if len(r.Waveform.Cells) > 7 || r.Waveform.RequestedStart != f.Render.StartFrame || r.Waveform.RequestedEnd != f.Render.EndFrame {
+		return r, errors.New("waveform window contract differs")
 	}
 	for _, step := range f.Steps {
 		snapshot, e := session.Dispatch(ctx, step.Command)

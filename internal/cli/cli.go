@@ -16,6 +16,7 @@ import (
 	"github.com/NLstn/riffine/core/audio"
 	"github.com/NLstn/riffine/core/practice"
 	"github.com/NLstn/riffine/core/project"
+	"github.com/NLstn/riffine/core/waveform"
 )
 
 const Help = `Riffine — local guitar practice core (working name)
@@ -31,6 +32,7 @@ const Help = `Riffine — local guitar practice core (working name)
   riffine plans    --project annotated.json --out planned.json --plans ladder.json
   riffine plan     --project planned.json --id ladder
   riffine annotate --project song.riffine.json --out annotated.riffine.json --annotations notes.json
+  riffine waveform-window --project song.riffine.json [--start-frame 0 --end-frame 48000 --bins 1000 --cache DIR]
   riffine waveform --project song.riffine.json [--bins 1000 --out song.peaks.json]
   riffine render   --project song.riffine.json --out practice.wav
   riffine play     --project song.riffine.json
@@ -52,7 +54,8 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 	command := args[0]
 	f := flag.NewFlagSet(command, flag.ContinueOnError)
 	f.SetOutput(errOut)
-	var source, dest, proj, annotationFile, plansFile, planID string
+	var source, dest, proj, annotationFile, plansFile, planID, cacheDir string
+	var startFrame, endFrame int64
 	var verify, silent bool
 	var speed, pitch, start, end, seconds, hz float64
 	var enabled bool
@@ -93,6 +96,12 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 		f.StringVar(&proj, "project", "", "existing project")
 		f.StringVar(&dest, "out", "", "new annotated project")
 		f.StringVar(&annotationFile, "annotations", "", "portable annotations JSON file")
+	case "waveform-window":
+		f.StringVar(&proj, "project", "", "project path")
+		f.StringVar(&cacheDir, "cache", "", "optional dedicated waveform cache directory")
+		f.Int64Var(&startFrame, "start-frame", 0, "first source frame")
+		f.Int64Var(&endFrame, "end-frame", 0, "exclusive source end frame (default full track)")
+		f.IntVar(&bins, "bins", 1000, "maximum returned peak cells, 1–4096")
 	case "waveform":
 		f.StringVar(&proj, "project", "", "project path")
 		f.StringVar(&dest, "out", "", "optional output JSON (default stdout)")
@@ -251,6 +260,32 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 		if err = session.Relink(ctx, source); err != nil {
 			return err
 		}
+	case "waveform-window":
+		if endFrame == 0 && !provided["end-frame"] {
+			endFrame = p.Track.Audio.Frames
+		}
+		if startFrame < 0 || endFrame <= startFrame || endFrame > p.Track.Audio.Frames || bins < 1 || bins > 4096 {
+			return errors.New("invalid waveform window or bin limit")
+		}
+		var cache waveform.Cache
+		if cacheDir != "" {
+			cache = filesystem.PeakCache{Directory: cacheDir}
+		}
+		result, e := session.OpenWaveform(ctx, cache, nil)
+		if e != nil {
+			return e
+		}
+		if result.CacheError != nil {
+			fmt.Fprintf(errOut, "Waveform cache unavailable: %v\n", result.CacheError)
+		}
+		window, e := result.Pyramid.Query(ctx, startFrame, endFrame, bins)
+		if e != nil {
+			return e
+		}
+		return writeJSON(struct {
+			CacheStatus string `json:"cacheStatus"`
+			waveform.Window
+		}{result.CacheStatus, window})
 	case "waveform":
 		w, e := session.Waveform(ctx, bins)
 		if e != nil {
