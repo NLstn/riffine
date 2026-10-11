@@ -27,12 +27,61 @@ jobs:
           build/host-spike/host-spike < core/practice/testdata/session-v1.json > build/host-spike/go-report.json
           build/host-spike/native/mobile-runner core/practice/testdata/session-v1.json > build/host-spike/c-report.json
           diff -u build/host-spike/go-report.json build/host-spike/c-report.json
-  ios-link:
+  ios-runtime:
     runs-on: macos-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version: '1.24.x'
           cache: false
+      - run: sh scripts/build-host-spike.sh portable
       - run: RIFFINE_SPIKE_OUT=build/host-spike/ios sh scripts/build-host-spike.sh ios
+      - run: python3 scripts/check-ios-spike.py
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: ios-runtime-evidence
+          path: |
+            build/host-spike/ios/report.json
+            build/host-spike/ios/metrics.json
+          if-no-files-found: warn
+
+  android-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/27.3.13750724
+      RIFFINE_NDK_HOST_TAG: linux-x86_64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.24.x'
+          cache: false
+      - name: Install pinned NDK and emulator image
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.3.13750724" "emulator" "system-images;android-35;google_apis;x86_64"
+      - run: sh scripts/build-host-spike.sh portable
+      - name: Build arm64 Android C ABI
+        run: RIFFINE_SPIKE_OUT=build/host-spike/android-arm64 sh scripts/build-host-spike.sh android
+      - name: Build x86_64 Android C ABI for emulator execution
+        run: RIFFINE_ANDROID_ARCH=amd64 RIFFINE_SPIKE_OUT=build/host-spike/android-amd64 sh scripts/build-host-spike.sh android
+      - name: Execute repeated C-to-Go conformance on Android
+        run: |
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          printf 'no\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --name riffine-ci --package "system-images;android-35;google_apis;x86_64" --force
+          trap 'adb -s emulator-5554 emu kill >/dev/null 2>&1 || true' EXIT
+          "$ANDROID_HOME/emulator/emulator" -avd riffine-ci -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on >build/host-spike/android-amd64/emulator.log 2>&1 &
+          python3 scripts/check-android-spike.py
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: android-runtime-evidence
+          path: |
+            build/host-spike/android-amd64/report.json
+            build/host-spike/android-amd64/metrics.json
+            build/host-spike/android-amd64/emulator.log
+          if-no-files-found: warn

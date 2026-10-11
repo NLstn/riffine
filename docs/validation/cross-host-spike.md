@@ -120,3 +120,12 @@ for the existing aggregate CI gate.
 #13 stays open: complete Android C ABI build/run, iOS runtime round-trip, C++ DSP
 WASM execution and device/lifecycle/processing measurements before selecting
 production bindings. Existing #12 PR CI completed successfully during this work.
+
+## Runtime follow-up, 2026-10-11
+
+The earlier simulator inventory timeout was resolved using the appropriate host
+execution permissions. Actual iOS simulator C-to-Go runtime conformance now passes
+20 repeated calls, including the newer session/transport/ladder traces. See
+[mobile runtime evidence](mobile-runtime.md) for measurements, scripts, Android CI
+coverage and the remaining production/audio gates. The initial table above remains
+a record of the 2026-10-10 run rather than current coverage.

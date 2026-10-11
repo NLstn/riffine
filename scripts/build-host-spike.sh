@@ -28,9 +28,15 @@ case "$mode" in
  android)
   : "${ANDROID_NDK_HOME:?Set ANDROID_NDK_HOME to an installed NDK with an arm64 API 24 compiler}"
   : "${RIFFINE_NDK_HOST_TAG:?Set RIFFINE_NDK_HOST_TAG to darwin-x86_64 or linux-x86_64}"
-  clang="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$RIFFINE_NDK_HOST_TAG/bin/aarch64-linux-android24-clang"
+  arch="${RIFFINE_ANDROID_ARCH:-arm64}"
+  case "$arch" in
+   arm64) target=aarch64-linux-android24 ;;
+   amd64) target=x86_64-linux-android24 ;;
+   *) echo "RIFFINE_ANDROID_ARCH must be arm64 or amd64" >&2; exit 2 ;;
+  esac
+  clang="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$RIFFINE_NDK_HOST_TAG/bin/$target-clang"
   test -x "$clang"
-  CGO_ENABLED=1 GOOS=android GOARCH=arm64 CC="$clang" go build -trimpath -buildmode=c-shared -o "$output/libhost-spike.so" ./cmd/host-spike-mobile
+  CGO_ENABLED=1 GOOS=android GOARCH="$arch" CC="$clang" go build -trimpath -buildmode=c-shared -o "$output/libhost-spike.so" ./cmd/host-spike-mobile
   "$clang" -I "$output" spikes/mobile/runner.c -L "$output" -lhost-spike -o "$output/mobile-runner"
   ;;
  *) echo "Usage: $0 [portable|native|ios|android]" >&2; exit 2 ;;
