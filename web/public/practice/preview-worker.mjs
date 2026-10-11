@@ -34,6 +34,7 @@ export function run(options, readPCM, complete, failed) {
     }
     if (state.state === QueueState.closed || state.state === QueueState.error) throw new Error('Audio output stopped.');
     if (state.copiedFrames !== copied) { copied = state.copiedFrames; progressAt = performance.now(); }
+    if (state.state === QueueState.pausing || state.state === QueueState.paused) progressAt = performance.now();
     if (startedOutput && performance.now() - progressAt > 10000) throw new Error('Audio output made no progress for 10 seconds.');
     return state;
    };

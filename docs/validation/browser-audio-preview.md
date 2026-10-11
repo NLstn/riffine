@@ -17,8 +17,8 @@ npm --prefix web run dev
 
 Open the localhost URL, choose **Open practice workspace**, then **Try generated
 demo**. Set speed to 75%, pitch to +3, and apply an enabled 0.25–0.75 second A/B
-selection. **Preview selection** plays that saved range once. Cancel stops it;
-you can edit or preview again. A disabled loop previews the whole original.
+selection. **Preview selection** plays that saved range once. On hosts with output timestamps, **Pause preview** holds it and **Resume preview**
+continues the retained audio. Cancel stops it; you can edit or preview again. A disabled loop previews the whole original.
 
 The optional processing build copies complete dependency notices alongside its
 static assets. Core editing still works without those assets, with preview
@@ -63,7 +63,8 @@ copied block's AudioWorklet `currentFrame` to its PCM ordinal. The host samples
 that device timestamp until the final tracked frame has passed it, then closes
 the context. Browsers without timestamps retain a conservative host buffer-drain
 delay after callback copying. Neither path emits core transport acknowledgements.
-See [browser presentation mapping](browser-presentation-mapping.md).
+See [browser presentation mapping](browser-presentation-mapping.md) and the
+[preview pause boundary](browser-output-boundary.md).
 
 ## Evidence
 

@@ -113,3 +113,25 @@ worker.emit({ type: 'result', id: failedClockRequest.id, response: { version: 1,
 await assert.rejects(clockFailure, /Invalid output timestamp/);
 assert.equal(failedClockContext.closeCalls, 1); client.dispose();
 console.log(JSON.stringify({ clockFailureAwaitsCoreTeardownFence: true }));
+
+// Pause cancellation retains the pending core reader fence, then closes once.
+const { OutputBoundary } = await import('../web/public/practice/output-boundary.mjs');
+let controlsReady = 0;
+client = new BrowserPractice({ loadOutput: () => Promise.resolve({ ...queueModule, OutputBoundary }) });
+worker = MockWorker.instances.at(-1); worker.emit({ type: 'ready' });
+const controlled = client.preview(snapshot, () => { controlsReady++; }); await tick();
+assert.equal(controlsReady, 1);
+const controlledContext = MockAudioContext.instances.at(-1);
+const controlledWriter = new OutputWriter(capturedNode.queue), controlledConsumer = new OutputConsumer(capturedNode.queue, capturedNode.timeline);
+controlledWriter.write(new Float32Array(256)); controlledWriter.start(); controlledConsumer.process([new Float32Array(128)], 128);
+const pausingPreview = client.pausePreview(); controlledConsumer.process([new Float32Array(128)], 256);
+controlledContext.deviceTime = 256 / 48000;
+assert.equal(await pausingPreview, true); assert.equal(controlledContext.state, 'suspended');
+const resumesBefore = controlledContext.resumeCalls;
+const resumingPreview = client.resumePreview(); assert.equal(controlledContext.resumeCalls, resumesBefore + 1); await resumingPreview;
+const secondPausing = client.pausePreview(); client.cancel(); await assert.rejects(secondPausing, /cancelled/);
+assert.equal(controlledContext.closeCalls, 0); // worker still owns borrowed reader
+const controlledRequest = worker.sent.find(message => message.request?.type === 'preview');
+worker.emit({ type: 'result', id: controlledRequest.id, response: { version: 1, error: {code: 'cancelled', message: 'context canceled'} } });
+assert.equal((await controlled).error.code, 'cancelled'); assert.equal(controlledContext.closeCalls, 1); client.dispose();
+console.log(JSON.stringify({ previewControlsReady: true, facadePauseResume: true, cancelPauseRetainsReaderFence: true }));

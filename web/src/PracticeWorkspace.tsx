@@ -12,6 +12,9 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
  const [snapshot, setSnapshot] = useState<Snapshot>();
  const [wave, setWave] = useState<WaveWindow>();
  const [busy, setBusy] = useState(false);
+ const [previewControls, setPreviewControls] = useState(false);
+ const [previewPaused, setPreviewPaused] = useState(false);
+ const [previewControlBusy, setPreviewControlBusy] = useState(false);
  const [busyLabel, setBusyLabel] = useState('Working locally…');
  const [error, setError] = useState('');
  const [status, setStatus] = useState('Choose an original WAV and optionally a saved project.');
@@ -87,9 +90,21 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
  const preview = () => run(async () => {
   if (!facade.current?.preview || !snapshot) return;
   setStatus('Previewing the saved selection once…');
-  const result = install(await facade.current.preview(snapshot));
+  setPreviewPaused(false); setPreviewControls(false);
+  let result: PracticeResponse;
+  try { result = install(await facade.current.preview(snapshot, () => setPreviewControls(true))); }
+  finally { setPreviewControls(false); setPreviewControlBusy(false); }
   setStatus(result.preview?.underrunFrames ? 'Selection preview finished with an audio interruption. You can try it again.' : 'Selection preview finished.');
  }, 'Previewing the saved selection once…');
+ const togglePreview = async () => {
+  const client = facade.current; if (!client) return;
+  setPreviewControlBusy(true);
+  try {
+   if (previewPaused) { await client.resumePreview?.(); setPreviewPaused(false); setBusyLabel('Previewing the saved selection once…'); }
+   else if (await client.pausePreview?.()) { setPreviewPaused(true); setBusyLabel('Selection preview paused.'); }
+  } catch (failure) { setError(String(failure instanceof Error ? failure.message : failure)); client.cancel(); }
+  finally { setPreviewControlBusy(false); }
+ };
  const duration = snapshot ? snapshot.project.track.audio.frames / snapshot.project.track.audio.sampleRate : 0;
  const viewStart = wave?.requestedStart ?? 0;
  const viewEnd = wave?.requestedEnd ?? 1;
@@ -111,6 +126,7 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
    })}>Try generated demo</button>
    <button type="button" disabled={busy} onClick={() => projectInput.current?.click()}>Reopen project</button>
    <button type="button" disabled={busy || !snapshot} onClick={() => void exportProject()}>Download project</button>
+   {busy && previewControls && <button type="button" disabled={previewControlBusy} onClick={() => void togglePreview()}>{previewPaused ? 'Resume preview' : 'Pause preview'}</button>}
    {busy && <button type="button" onClick={() => facade.current?.cancel()}>Cancel operation</button>}
   </div>
   <input className="visually-hidden" ref={sourceInput} type="file" accept=".wav,.wave,audio/wav" onChange={event => { chooseSource(event.target.files?.[0]); event.target.value = ''; }} />

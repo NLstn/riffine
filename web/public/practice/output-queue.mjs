@@ -1,7 +1,7 @@
 import { PresentationWriter } from './presentation-timeline.mjs';
 // Device-buffer plumbing only. Queue consumption counts callback submission;
 // it must never be passed to the shared core as hardware presentation evidence.
-export const QueueState = Object.freeze({ primed: 0, running: 1, closed: 2, error: 3, done: 4 });
+export const QueueState = Object.freeze({ primed: 0, running: 1, closed: 2, error: 3, done: 4, pausing: 5, paused: 6 });
 export class CountersBusyError extends Error {}
 const words = 16, bytes = words * 4;
 const version = 0, channelsIndex = 1, capacityIndex = 2, writeIndex = 3, readIndex = 4,
@@ -34,7 +34,7 @@ export class OutputWriter extends Queue {
  write(pcm) {
   if (!(pcm instanceof Float32Array) || pcm.length < this.channels || pcm.length > 8192 * this.channels || pcm.length % this.channels) throw new Error('Invalid output PCM block.');
   const state = Atomics.load(this.header, stateIndex);
-  if (state !== QueueState.primed && state !== QueueState.running || Atomics.load(this.header, eofIndex)) throw new Error('Output queue no longer accepts PCM.');
+  if (state !== QueueState.primed && state !== QueueState.running && state !== QueueState.pausing && state !== QueueState.paused || Atomics.load(this.header, eofIndex)) throw new Error('Output queue no longer accepts PCM.');
   const write = Atomics.load(this.header, writeIndex) >>> 0;
   const read = Atomics.load(this.header, readIndex) >>> 0;
   const used = (write - read) >>> 0;
@@ -52,6 +52,13 @@ export class OutputWriter extends Queue {
  }
  start() {
   if (Atomics.compareExchange(this.header, stateIndex, QueueState.primed, QueueState.running) !== QueueState.primed) throw new Error('Output queue cannot start again.');
+ }
+ requestPause() {
+  const state = Atomics.load(this.header, stateIndex);
+  if (state === QueueState.running) Atomics.compareExchange(this.header, stateIndex, QueueState.running, QueueState.pausing);
+ }
+ resume() {
+  if (Atomics.compareExchange(this.header, stateIndex, QueueState.paused, QueueState.running) !== QueueState.paused) throw new Error('Output queue is not paused.');
  }
  sealEOF() { Atomics.store(this.header, eofIndex, 1); }
  snapshot() {
@@ -83,7 +90,11 @@ export class OutputConsumer extends Queue {
   if (!outputs) { Atomics.store(this.header, stateIndex, QueueState.error); return false; }
   for (let c = 0; c < outputs.length; c++) outputs[c].fill(0);
   const state = Atomics.load(this.header, stateIndex);
-  if (state !== QueueState.running) return state === QueueState.primed;
+  // A pause request is acknowledged only on a callback boundary, after any
+  // preceding copy/counters/timeline publication. Keep the context graph alive
+  // with silence so device timestamps can catch up to submitted PCM.
+  if (state === QueueState.pausing) { Atomics.store(this.header, stateIndex, QueueState.paused); return true; }
+  if (state !== QueueState.running) return state === QueueState.primed || state === QueueState.paused;
   if (outputs.length !== this.channels || !outputs[0] || !outputs[0].length) { Atomics.store(this.header, stateIndex, QueueState.error); return false; }
   const quantum = outputs[0].length;
   for (let c = 1; c < this.channels; c++) if (outputs[c].length !== quantum) { Atomics.store(this.header, stateIndex, QueueState.error); return false; }
