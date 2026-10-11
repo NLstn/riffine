@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import time
 
 root = Path(__file__).resolve().parent.parent
@@ -12,7 +13,12 @@ portable = root / "build/host-spike"
 fixture = root / "core/practice/testdata/session-v1.json"
 
 def run(*args, timeout=30):
-    return subprocess.run(args, check=True, text=True, capture_output=True, timeout=timeout)
+    try:
+        return subprocess.run(args, check=True, text=True, capture_output=True, timeout=timeout)
+    except subprocess.CalledProcessError as error:
+        print(error.stdout[-4096:], file=sys.stderr)
+        print(error.stderr[-4096:], file=sys.stderr)
+        raise
 
 inventory = json.loads(run("xcrun", "simctl", "list", "devices", "available", "--json").stdout)
 candidates = [(runtime, device) for runtime, devices in inventory["devices"].items()

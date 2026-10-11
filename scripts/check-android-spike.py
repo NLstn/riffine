@@ -4,18 +4,25 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import time
 import uuid
 
 root = Path(__file__).resolve().parent.parent
 output = Path(os.environ.get("RIFFINE_SPIKE_OUT", root / "build/host-spike/android-amd64")).resolve()
 fixture = root / "core/practice/testdata/session-v1.json"
-adb = os.environ.get("RIFFINE_ADB", "adb")
+sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
+adb = os.environ.get("RIFFINE_ADB") or (str(Path(sdk) / "platform-tools/adb") if sdk else "adb")
 serial = os.environ.get("RIFFINE_ANDROID_SERIAL", "emulator-5554")
 remote = "/data/local/tmp/riffine-host-spike-" + uuid.uuid4().hex
 
 def command(*args, timeout=30):
-    return subprocess.run(args, text=True, capture_output=True, check=True, timeout=timeout)
+    try:
+        return subprocess.run(args, text=True, capture_output=True, check=True, timeout=timeout)
+    except subprocess.CalledProcessError as error:
+        print(error.stdout[-4096:], file=sys.stderr)
+        print(error.stderr[-4096:], file=sys.stderr)
+        raise
 
 def target(*args, timeout=30):
     return command(adb, "-s", serial, *args, timeout=timeout)
