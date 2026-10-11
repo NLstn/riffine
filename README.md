@@ -141,3 +141,9 @@ saves a new v3 document. [Examples and migration details](docs/validation/portab
 `riffine save --project song.json --speed 0.6 --pitch 3` now saves to the same
 project with revision protection and a readable previous-revision recovery copy.
 [Saving and recovery](docs/validation/session-revisions.md).
+
+
+The shared core also supports bounded WAV frame reads and library indexing.
+`riffine scan --sources sources.json` emits bounded JSON batches with actual
+format capabilities and duplicate/unavailable outcomes; see
+[the PCM/library validation and recipe](docs/validation/pcm-library.md).

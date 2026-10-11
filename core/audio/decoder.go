@@ -24,10 +24,12 @@ func (WAVDecoder) Peaks(ctx context.Context, r resource.Reader, bins int) (Wavef
 	return Peaks(ctx, r, bins)
 }
 
-// PCMDecoder is the future streaming decoder port. Frames are interleaved,
+// PCMDecoder is the streaming decoder port. Frames are interleaved,
 // normalized float32 in original source time; ReadFrames returns per-channel
 // frame counts, and SeekFrame is exact after decoder offset compensation.
-// WAVDecoder currently implements inspection/peaks only.
+// Streams borrow resources; Close never closes the caller-owned reader.
+// Read buffers hold 1–PCMBlockFrames whole interleaved frames.
+// A read may return fewer frames at EOF, followed by io.EOF on the next read.
 type PCMDecoder interface {
 	OpenPCM(context.Context, resource.Reader) (PCMStream, error)
 }
