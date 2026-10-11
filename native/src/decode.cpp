@@ -62,6 +62,7 @@ uint32_t precision(const char *path,uint32_t encoding){
 void readExact(riffine_decoder *s,float *out,uint32_t frames){
  ma_uint64 read=0;auto result=ma_decoder_read_pcm_frames(&s->decoder,out,frames,&read);
  require((result==MA_SUCCESS||result==MA_AT_END)&&read==frames,"truncated or malformed decoded audio");
+ require(s->info.decoded_frames<=UINT64_MAX-frames,"decoded diagnostic counter overflow");s->info.decoded_frames+=frames;
  for(size_t i=0;i<size_t(frames)*s->info.channels;++i)require(std::isfinite(out[i]),"non-finite decoded sample");
 }
 }

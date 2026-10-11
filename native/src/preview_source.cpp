@@ -45,6 +45,7 @@ int riffine_preview_open(const char *path,int64_t start,int64_t end,double speed
     require(riffine_decoder_info_get(s->decoder,&sourceInfo,error,size)==0 && uint64_t(end)<=sourceInfo.frames,"preview range exceeds source");
     s->channels=sourceInfo.channels;s->rate=sourceInfo.sample_rate;
     require(riffine_decoder_seek(s->decoder,uint64_t(start),error,size)==0,"cannot seek preview source");
+    require(riffine_decoder_info_get(s->decoder,&sourceInfo,error,size)==0,"cannot query seek decode diagnostics");s->decoded=sourceInfo.decoded_frames;
     s->remaining=uint64_t(end-start);
     require(s->remaining<=(uint64_t(1)<<48),"preview range exceeds streaming frame counter limit");
     s->expected=uint64_t(std::llround(double(s->remaining)/speed));

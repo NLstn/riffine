@@ -13,6 +13,7 @@ extern "C" {
 typedef struct riffine_preview_source riffine_preview_source;
 typedef struct riffine_preview_info {
   uint32_t channels, sample_rate;
+  /* Includes discarded MP3 seek replay as well as selected source reads. */
   uint64_t output_frames, decoded_frames;
 } riffine_preview_info;
 int riffine_preview_open(const char *input, int64_t start, int64_t end,
