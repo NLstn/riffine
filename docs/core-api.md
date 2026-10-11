@@ -21,7 +21,8 @@ source identity before processing. `Relink` accepts only matching bytes AND
 metadata. `SaveAs` rebases the reference for a destination, serializes a validated
 project, and requests exclusive creation; it leaves the current document, state,
 sequence and source unchanged. Reopen the destination to use it as a new session.
-No operation replaces source audio or an existing project.
+No operation replaces source audio. Explicit `Save` updates an opened project
+through the revision-protected optional persistence port; save-as remains exclusive.
 
 Each `Resources.Open` transfers a reader which core closes on all paths. Decoders
 borrow it without closing it. `Reader.Size` describes the resource at open time;
@@ -38,7 +39,8 @@ The core independently rejects project JSON over 1 MiB. `Store.Create` must publ
 all bytes exclusively or leave no partial destination. The filesystem adapter
 stages/syncs and links on the destination volume, with permissions 0600. Existing
 files and symlinks fail creation. Filesystems without hard-link support currently
-report an error. In-place updates, recovery and concurrent revisions are #16.
+report an error. Revision-protected updates and recovery use `UpdatingStore`; see
+[session saving](validation/session-revisions.md).
 
 ## Commands, snapshots and errors
 
@@ -70,7 +72,8 @@ that lock. Hosts should call operations on a worker to keep presentation respons
 
 Errors serialize as `{version, code, message}`. Codes are `invalid_command`,
 `unsupported_version`, `invalid_project`, `resource_unavailable`, `identity_mismatch`,
-`unsupported_capability`, `out_of_order`, `cancelled` and `host_failure`.
+`unsupported_capability`, `out_of_order`, `cancelled`, `host_failure`,
+`revision_conflict` and `document_busy`.
 Go errors retain their cause (`errors.Is` works for cancellation/deadlines and
 filesystem errors). Cancellation is checked before state commits and publication;
 a request racing an already committed operation does not undo it. A host must

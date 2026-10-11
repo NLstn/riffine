@@ -12,6 +12,7 @@ import (
 	"github.com/NLstn/riffine/adapters/filesystem"
 	"github.com/NLstn/riffine/core/audio"
 	"github.com/NLstn/riffine/core/practice"
+	"github.com/NLstn/riffine/core/resource"
 )
 
 func TestPracticeWorkflow(t *testing.T) {
@@ -133,5 +134,61 @@ func TestAnnotatedProjectWorkflow(t *testing.T) {
 	var out bytes.Buffer
 	if e = Run(context.Background(), []string{"annotate", "--project", document, "--out", saved, "--annotations", annotationFile}, &out, &out); e == nil {
 		t.Fatal("overwrote existing annotated project")
+	}
+}
+
+func TestRevisionProtectedSaveCLI(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "tone.wav")
+	document := filepath.Join(dir, "project.json")
+	run := func(args ...string) []byte {
+		t.Helper()
+		var b bytes.Buffer
+		if e := Run(context.Background(), args, &b, &b); e != nil {
+			t.Fatal(args, e, b.String())
+		}
+		return append([]byte(nil), b.Bytes()...)
+	}
+	run("tone", "--out", source, "--seconds", "1")
+	run("import", "--audio", source, "--out", document)
+	before, _ := os.ReadFile(document)
+	audioBefore, _ := os.ReadFile(source)
+	report := run("save", "--project", document, "--speed", "0.6", "--pitch", "3")
+	var result resource.UpdateResult
+	if e := json.Unmarshal(report, &result); e != nil {
+		t.Fatal(e)
+	}
+	old, e := os.ReadFile(result.Recovery)
+	if e != nil || !bytes.Equal(old, before) {
+		t.Fatal("missing valid recovery", e)
+	}
+	service := practice.Service{Resources: filesystem.Host{}, Store: filesystem.Host{}, Decoder: audio.WAVDecoder{}}
+	session, e := service.Open(context.Background(), document)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if session.Snapshot().Project.Settings.Speed != .6 || session.Snapshot().Project.Settings.Pitch != 3 || session.Snapshot().Revision != result.Revision {
+		t.Fatal(session.Snapshot(), result)
+	}
+	recovered := filepath.Join(dir, "recovered.json")
+	previous, e := service.Open(context.Background(), result.Recovery)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = previous.SaveAs(context.Background(), recovered); e != nil {
+		t.Fatal(e)
+	}
+	recoverySession, e := service.Open(context.Background(), recovered)
+	if e != nil || recoverySession.Snapshot().Project.Settings.Speed != 1 {
+		t.Fatal("could not recover previous settings", e)
+	}
+	audioAfter, _ := os.ReadFile(source)
+	if !bytes.Equal(audioBefore, audioAfter) {
+		t.Fatal("save changed source audio")
+	}
+	run("save", "--project", document)
+	var b bytes.Buffer
+	if e = Run(context.Background(), []string{"save", "--project", document, "--out", source}, &b, &b); e == nil {
+		t.Fatal("save accepted conflicting output path")
 	}
 }

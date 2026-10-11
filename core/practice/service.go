@@ -30,6 +30,8 @@ const (
 	OutOfOrder            ErrorCode = "out_of_order"
 	Cancelled             ErrorCode = "cancelled"
 	HostFailure           ErrorCode = "host_failure"
+	RevisionConflict      ErrorCode = "revision_conflict"
+	DocumentBusy          ErrorCode = "document_busy"
 )
 
 type Error struct {
@@ -72,6 +74,7 @@ type Snapshot struct {
 	State        string          `json:"state"`
 	Project      project.Project `json:"project"`
 	Capabilities Capabilities    `json:"capabilities"`
+	Revision     string          `json:"revision,omitempty"`
 }
 type Event struct {
 	Version  int    `json:"version"`
@@ -147,7 +150,7 @@ func (s Service) Open(ctx context.Context, document string) (*Session, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, failure(Cancelled, err)
 	}
-	return &Session{service: s, document: document, source: source, p: p}, nil
+	return &Session{service: s, document: document, source: source, p: p, revision: resource.Revision(b)}, nil
 }
 
 // Session serializes control operations. No method belongs on an audio callback.
@@ -159,6 +162,7 @@ type Session struct {
 	service          Service
 	document, source string
 	p                project.Project
+	revision         string
 	sequence         uint64
 	events           [EventCapacity]Event
 	head, count      int
@@ -166,7 +170,7 @@ type Session struct {
 }
 
 func (s *Session) snapshot() Snapshot {
-	return Snapshot{Version: APIVersion, Sequence: s.sequence, State: "ready", Project: s.p.Clone(),
+	return Snapshot{Version: APIVersion, Sequence: s.sequence, State: "ready", Revision: s.revision, Project: s.p.Clone(),
 		Capabilities: Capabilities{Formats: append([]string{}, s.service.Decoder.Formats()...), OfflineRender: s.service.Renderer != nil, StreamPreview: s.service.Previewer != nil}}
 }
 func (s *Session) Snapshot() Snapshot { s.mu.Lock(); defer s.mu.Unlock(); return s.snapshot() }
@@ -378,4 +382,40 @@ func (s *Session) Preview(ctx context.Context) (engine.PreviewReport, error) {
 		return engine.PreviewReport{}, failure(HostFailure, errors.New("preview adapter returned inconsistent source/output diagnostics"))
 	}
 	return report, nil
+}
+
+// Save updates the opened document using its exact byte revision. Import must
+// use SaveAs and reopen first. Save does not change the edit sequence; cancellation
+// racing an already committed update cannot undo publication.
+func (s *Session) Save(ctx context.Context) (resource.UpdateResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var result resource.UpdateResult
+	if err := ctx.Err(); err != nil {
+		return result, failure(Cancelled, err)
+	}
+	store, ok := s.service.Store.(resource.UpdatingStore)
+	if !ok || s.revision == "" {
+		return result, failure(UnsupportedCapability, errors.New("revision-protected saving is unavailable; use SaveAs and reopen"))
+	}
+	data, err := project.Encode(s.p)
+	if err != nil {
+		return result, failure(InvalidProject, err)
+	}
+	result, err = store.Update(ctx, s.document, s.revision, data)
+	if err != nil {
+		code := HostFailure
+		if errors.Is(err, resource.ErrRevisionConflict) {
+			code = RevisionConflict
+		}
+		if errors.Is(err, resource.ErrDocumentBusy) {
+			code = DocumentBusy
+		}
+		return result, failure(code, err)
+	}
+	if result.Revision != resource.Revision(data) {
+		return result, failure(HostFailure, errors.New("host returned an invalid committed revision; reopen the document"))
+	}
+	s.revision = result.Revision
+	return result, nil
 }
