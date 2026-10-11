@@ -80,7 +80,7 @@ func (a Adapter) Preview(ctx context.Context, r engine.PreviewRequest) (engine.P
 	if report.Version != 1 || report.Mode != mode || report.Backend == "" || (a.SilentPreview && report.Backend != "Null") || (!a.SilentPreview && report.Backend == "Null") ||
 		report.Channels < 1 || report.Channels > 2 || report.SampleRate < 8000 || report.SampleRate > 192000 ||
 		report.OutputFrames != want || report.CopiedFrames != want || report.UnderrunFrames < 0 ||
-		report.DecodedBeforeStart < 1 || report.DecodedBeforeStart > r.EndFrame-r.StartFrame ||
+		report.DecodedBeforeStart < 1 || report.DecodedBeforeStart > r.EndFrame ||
 		math.IsNaN(report.StartupMilliseconds) || math.IsInf(report.StartupMilliseconds, 0) || report.StartupMilliseconds < 0 {
 		return engine.PreviewReport{}, errors.New("unexpected streaming preview diagnostics")
 	}

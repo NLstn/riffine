@@ -7,7 +7,7 @@ No third-party source or commercial recordings are committed in this repository.
 | --- | --- | --- | --- |
 | [Signalsmith Stretch](https://github.com/Signalsmith-Audio/signalsmith-stretch) | `a670068d9aeb64913331d5cc29337b19a457a7df` | MIT | Independent pitch/time processing |
 | [Signalsmith Linear](https://github.com/Signalsmith-Audio/linear) | `de55e6a50ffcf6f8f43f649692d94691c7025151` (0.6.4) | MIT | DSP/FFT dependency |
-| [miniaudio](https://github.com/mackron/miniaudio) | `f40cf03f80cdb7e741d43e53b7e706e8c1394bcf` (0.11.23) | MIT-0 alternative selected | WAV codec and native device output |
+| [miniaudio](https://github.com/mackron/miniaudio) | `f40cf03f80cdb7e741d43e53b7e706e8c1394bcf` (0.11.23) | MIT-0 alternative selected | WAV/FLAC/MP3 codecs and native device output |
 
 CMake downloads these revisions and installs their complete license texts into
 `licenses/`. Distribute that directory with native binaries, together with this

@@ -32,7 +32,12 @@ is an opaque host string; `Resolve`/`Reference` translate saved locators relativ
 a document. Handles must not substitute for content identity across hosts.
 SHA-256 covers original bytes including metadata; re-encoding or retagging changes
 identity. Decoder cursors (`DataOffset`/`DataBytes`) are never saved session metadata.
-Project-v3 metadata still supports only integer PCM WAV; #17 adds codecs.
+Project v4 separates the source codec (`encoding`) and optional original sample
+precision (`bits`) from generic source dimensions/identity. MP3 has no fixed PCM
+precision; WAV requires 16/24/32 bits and FLAC can report original precision.
+Versions 1–3 migrate explicitly as PCM WAV, preserving all coordinates/settings.
+Native tested adapters support WAV/FLAC/MP3; pure-Go/browser harnesses advertise
+WAV PCM only. See [codec validation](validation/native-codecs.md).
 
 `Store.Read` rejects documents over its requested limit before materializing them.
 The core independently rejects project JSON over 1 MiB. `Store.Create` must publish

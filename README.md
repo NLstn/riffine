@@ -5,7 +5,7 @@ A local-first, open-source guitar practice engine. **Working name; pre-alpha.**
 Riffine is a local-first guitar practice app. The repository contains a Go
 library and CLI plus an early React, TypeScript and Vite music-library client.
 The client lets a user choose a local music folder and reads common embedded
-tags in the browser. Audio files are not uploaded. The Go CLI imports PCM WAV
+tags in the browser. Audio files are not uploaded. The Go CLI imports PCM WAV and, with the tested native helper, FLAC/MP3
 songs, saves versioned practice projects, sets independent speed/pitch and A/B
 loops, extracts waveform peaks, renders practice audio through Signalsmith
 Stretch, and plays it through miniaudio.
@@ -147,3 +147,9 @@ The shared core also supports bounded WAV frame reads and library indexing.
 `riffine scan --sources sources.json` emits bounded JSON batches with actual
 format capabilities and duplicate/unavailable outcomes; see
 [the PCM/library validation and recipe](docs/validation/pcm-library.md).
+
+
+Project v4 records the source codec and optional source precision; v1–v3 PCM WAV
+projects migrate explicitly while keeping their settings, annotations and plans.
+See [native codec validation](docs/validation/native-codecs.md) for generated
+fixtures, supported operations and compressed seek limits.

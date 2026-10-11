@@ -13,7 +13,7 @@ extern "C" {
 typedef struct riffine_decoder riffine_decoder;
 typedef struct riffine_decoder_info {
  uint32_t channels, sample_rate, source_bits, encoding;
- uint64_t frames;
+ uint64_t frames, decoded_frames;
 } riffine_decoder_info;
 int riffine_decoder_open_file(const char *path, riffine_decoder **decoder, char *error, size_t size);
 int riffine_decoder_info_get(const riffine_decoder *decoder, riffine_decoder_info *info, char *error, size_t size);
