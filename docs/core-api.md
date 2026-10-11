@@ -31,7 +31,7 @@ is an opaque host string; `Resolve`/`Reference` translate saved locators relativ
 a document. Handles must not substitute for content identity across hosts.
 SHA-256 covers original bytes including metadata; re-encoding or retagging changes
 identity. Decoder cursors (`DataOffset`/`DataBytes`) are never saved session metadata.
-Version-1 project metadata still supports only integer PCM WAV; #17 adds codecs.
+Project-v2 metadata still supports only integer PCM WAV; #17 adds codecs.
 
 `Store.Read` rejects documents over its requested limit before materializing them.
 The core independently rejects project JSON over 1 MiB. `Store.Create` must publish
@@ -42,7 +42,7 @@ report an error. In-place updates, recovery and concurrent revisions are #16.
 
 ## Commands, snapshots and errors
 
-The API version is 1. `DecodeCommand(io.Reader)` rejects messages over 4 KiB,
+The API version is 1. `DecodeCommand(io.Reader)` rejects messages over 1 MiB,
 unknown fields and trailing JSON. `Dispatch` validates the version and payload
 again, including nonfinite values in direct Go calls. Commands:
 
@@ -181,3 +181,13 @@ loading/ready/playing/paused/stopped/error snapshots and acknowledged traversal
 events. Its host contract and reset/count policies are documented in
 [core transport validation](validation/core-transport.md). Production sessions
 retain `liveTransport: false` until a presentation-aware device adapter is connected.
+
+
+## Portable project v2 annotations
+
+Project decoding explicitly migrates v1 to v2 without changing source identity,
+settings or source seconds. `set_annotations` replaces validated regions, markers,
+notes, named loops and bookmarks. Snapshots own all annotation slices; clients
+cannot mutate a session by editing a previous snapshot. CLI `annotate` saves the
+result exclusively to a new file. See [portable session validation](validation/portable-sessions.md)
+for schema limits, migration fixtures, examples and outstanding revision/recovery work.

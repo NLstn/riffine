@@ -13,7 +13,7 @@ import (
 	"github.com/NLstn/riffine/core/audio"
 )
 
-const Version = 1
+const Version = 2
 
 type Loop struct {
 	Enabled bool    `json:"enabled"`
@@ -30,10 +30,11 @@ type Track struct {
 	Audio audio.Info `json:"audio"`
 }
 type Project struct {
-	Version  int      `json:"version"`
-	Name     string   `json:"name"`
-	Track    Track    `json:"track"`
-	Settings Settings `json:"settings"`
+	Version     int         `json:"version"`
+	Name        string      `json:"name"`
+	Track       Track       `json:"track"`
+	Settings    Settings    `json:"settings"`
+	Annotations Annotations `json:"annotations"`
 }
 
 func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
@@ -66,10 +67,10 @@ func (p Project) Validate() error {
 	if l.Enabled && (l.End-l.Start)*float64(i.SampleRate) < 1 {
 		return errors.New("enabled loop must contain at least one frame")
 	}
-	return nil
+	return p.Annotations.validate(i.Duration(), i.SampleRate)
 }
 
-// New builds a version-1 document. Reference is a host-produced locator;
+// New builds a version-2 document. Reference is a host-produced locator;
 // content identity is the fingerprint and metadata, never the locator.
 func New(name, reference string, info audio.Info) (Project, error) {
 	info.DataOffset, info.DataBytes = 0, 0 // Decoder cursor details are not document metadata.
@@ -88,11 +89,38 @@ func Decode(r io.Reader) (Project, error) {
 	if len(b) > MaxDocumentBytes {
 		return Project{}, errors.New("project exceeds 1 MiB")
 	}
+	var header struct {
+		Version int `json:"version"`
+	}
+	if err = json.Unmarshal(b, &header); err != nil {
+		return Project{}, err
+	}
+	if header.Version != 1 && header.Version != Version {
+		return Project{}, fmt.Errorf("unsupported project version %d (supported: 1 and %d)", header.Version, Version)
+	}
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
 	var p Project
-	if err = dec.Decode(&p); err != nil {
-		return Project{}, err
+	if header.Version == 1 {
+		// A distinct schema prevents v2 fields from being accepted under a v1 label.
+		var old struct {
+			Version  int      `json:"version"`
+			Name     string   `json:"name"`
+			Track    Track    `json:"track"`
+			Settings Settings `json:"settings"`
+		}
+		if err = dec.Decode(&old); err != nil {
+			return Project{}, err
+		}
+		p = Project{Version: Version, Name: old.Name, Track: old.Track, Settings: old.Settings}
+		if (old.Settings.Loop.End-old.Settings.Loop.Start)*float64(old.Track.Audio.SampleRate) >= 1 {
+			p.Annotations.Regions = []Region{{ID: "region-v1-loop", Label: "Saved loop", Start: old.Settings.Loop.Start, End: old.Settings.Loop.End}}
+			p.Annotations.Loops = []NamedLoop{{ID: "loop-v1", Label: "Saved loop", RegionID: "region-v1-loop"}}
+		}
+	} else {
+		if err = dec.Decode(&p); err != nil {
+			return Project{}, err
+		}
 	}
 	var extra any
 	if err = dec.Decode(&extra); err != io.EOF {

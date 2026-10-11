@@ -58,12 +58,13 @@ type Capabilities struct {
 // Command sequences start at 1, are contiguous and apply only on success.
 // Settings use speed ratios and pitch semitones; loop bounds use source seconds.
 type Command struct {
-	Version  int           `json:"version"`
-	Sequence uint64        `json:"sequence"`
-	Type     string        `json:"type"`
-	Speed    *float64      `json:"speed,omitempty"`
-	Pitch    *float64      `json:"pitch,omitempty"`
-	Loop     *project.Loop `json:"loop,omitempty"`
+	Version     int                  `json:"version"`
+	Sequence    uint64               `json:"sequence"`
+	Type        string               `json:"type"`
+	Speed       *float64             `json:"speed,omitempty"`
+	Pitch       *float64             `json:"pitch,omitempty"`
+	Loop        *project.Loop        `json:"loop,omitempty"`
+	Annotations *project.Annotations `json:"annotations,omitempty"`
 }
 type Snapshot struct {
 	Version      int             `json:"version"`
@@ -165,7 +166,7 @@ type Session struct {
 }
 
 func (s *Session) snapshot() Snapshot {
-	return Snapshot{Version: APIVersion, Sequence: s.sequence, State: "ready", Project: s.p,
+	return Snapshot{Version: APIVersion, Sequence: s.sequence, State: "ready", Project: s.p.Clone(),
 		Capabilities: Capabilities{Formats: append([]string{}, s.service.Decoder.Formats()...), OfflineRender: s.service.Renderer != nil, StreamPreview: s.service.Previewer != nil}}
 }
 func (s *Session) Snapshot() Snapshot { s.mu.Lock(); defer s.mu.Unlock(); return s.snapshot() }
@@ -208,7 +209,7 @@ func (s *Session) Dispatch(ctx context.Context, c Command) (Snapshot, error) {
 	p := s.p
 	switch c.Type {
 	case "set_parameters":
-		if c.Loop != nil || (c.Speed == nil && c.Pitch == nil) {
+		if c.Annotations != nil || c.Loop != nil || (c.Speed == nil && c.Pitch == nil) {
 			return reject(InvalidCommand, "set_parameters requires speed and/or pitch only")
 		}
 		if c.Speed != nil {
@@ -218,14 +219,19 @@ func (s *Session) Dispatch(ctx context.Context, c Command) (Snapshot, error) {
 			p.Settings.Pitch = *c.Pitch
 		}
 	case "set_loop":
-		if c.Loop == nil || c.Speed != nil || c.Pitch != nil {
+		if c.Annotations != nil || c.Loop == nil || c.Speed != nil || c.Pitch != nil {
 			return reject(InvalidCommand, "set_loop requires loop only")
 		}
 		p.Settings.Loop = *c.Loop
+	case "set_annotations":
+		if c.Annotations == nil || c.Loop != nil || c.Speed != nil || c.Pitch != nil {
+			return reject(InvalidCommand, "set_annotations requires annotations only")
+		}
+		p.Annotations = c.Annotations.Clone()
 	default:
 		return reject(UnsupportedCapability, fmt.Sprintf("unsupported command %q", c.Type))
 	}
-	if err := p.Validate(); err != nil {
+	if _, err := project.Encode(p); err != nil {
 		return s.snapshot(), failure(InvalidCommand, err)
 	}
 	if err := ctx.Err(); err != nil {

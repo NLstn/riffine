@@ -185,7 +185,7 @@ func TestMemoryRoundTripAndRelink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opened.Snapshot().Project != s.Snapshot().Project {
+	if !reflect.DeepEqual(opened.Snapshot().Project, s.Snapshot().Project) {
 		t.Fatal("round-trip changed saved units/identity")
 	}
 	host.data["opaque:moved"] = host.data["opaque:original"]
@@ -390,5 +390,53 @@ func TestPreviewVerifiesAndCancelsBeforeCallingHost(t *testing.T) {
 	errorCode(t, err, IdentityMismatch)
 	if r.called {
 		t.Fatal("changed source reached playback")
+	}
+}
+
+func TestAnnotationsSessionOwnershipSaveAndRelink(t *testing.T) {
+	s, host, _ := newSession(t)
+	a := project.Annotations{Notes: "A minor", Regions: []project.Region{{ID: "phrase", Label: "Pickup", Start: .1, End: .6}}, Loops: []project.NamedLoop{{ID: "repeat", Label: "Repeat pickup", RegionID: "phrase"}}, Bookmarks: []project.Bookmark{{ID: "resume", Position: .2}}}
+	got, err := s.Dispatch(context.Background(), Command{Version: 1, Sequence: 1, Type: "set_annotations", Annotations: &a})
+	errorCode(t, err, "")
+	a.Regions[0].Label = "mutated caller"
+	got.Project.Annotations.Regions[0].Label = "mutated snapshot"
+	if s.Snapshot().Project.Annotations.Regions[0].Label != "Pickup" {
+		t.Fatal("annotations borrowed caller/snapshot memory")
+	}
+	if err = s.SaveAs(context.Background(), "opaque:annotated"); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := s.service.Open(context.Background(), "opaque:annotated")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(reopened.Snapshot().Project, s.Snapshot().Project) {
+		t.Fatal("session annotations lost")
+	}
+	host.data["opaque:moved"] = append([]byte(nil), host.data["opaque:original"]...)
+	if err = reopened.Relink(context.Background(), "opaque:moved"); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(reopened.Snapshot().Project.Annotations, s.Snapshot().Project.Annotations) {
+		t.Fatal("relink changed stable annotations")
+	}
+	before := reopened.Snapshot()
+	invalid := project.Annotations{Loops: []project.NamedLoop{{ID: "bad", RegionID: "missing"}}}
+	_, err = reopened.Dispatch(context.Background(), Command{Version: 1, Sequence: before.Sequence + 1, Type: "set_annotations", Annotations: &invalid})
+	errorCode(t, err, InvalidCommand)
+	if !reflect.DeepEqual(before, reopened.Snapshot()) {
+		t.Fatal("invalid annotations changed session")
+	}
+	storedBefore := append([]byte(nil), host.data["opaque:annotated"]...)
+	sourceBefore := append([]byte(nil), host.data["opaque:original"]...)
+	host.failWrite = true
+	if err = reopened.SaveAs(context.Background(), "opaque:failed"); err == nil {
+		t.Fatal("ignored storage failure")
+	}
+	if !bytes.Equal(host.data["opaque:annotated"], storedBefore) || !bytes.Equal(host.data["opaque:original"], sourceBefore) {
+		t.Fatal("existing document changed")
+	}
+	if _, exists := host.data["opaque:failed"]; exists {
+		t.Fatal("partial project published")
 	}
 }

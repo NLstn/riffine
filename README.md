@@ -131,3 +131,9 @@ web/             React + TypeScript local music-library client
 See [the implementation plan](docs/implementation-plan.md),
 [architecture decision](docs/adr/0001-cli-first-core.md), and
 [third-party notices](THIRD_PARTY_NOTICES.md). Contributions: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+
+Portable session documents now support source-time regions, markers, notes,
+named loops and bookmarks. Version-1 documents migrate explicitly on read;
+`riffine annotate --project song.json --out annotated.json --annotations notes.json`
+saves a new v2 document. [Examples and migration details](docs/validation/portable-sessions.md).
