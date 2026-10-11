@@ -24,7 +24,7 @@ type TraversalCompletion struct {
 }
 
 func NewTraversal(s Schedule) (*Traversal, error) {
-	if s.Generation == 0 || s.Sequence == 0 || s.Source == "" || s.StartFrame < 0 || s.EndFrame <= s.StartFrame || s.OutputStart < 0 || s.OutputEnd <= s.OutputStart || math.IsNaN(s.Speed) || math.IsInf(s.Speed, 0) || s.Speed < .25 || s.Speed > 2 || math.IsNaN(s.Pitch) || math.IsInf(s.Pitch, 0) || s.Pitch < -12 || s.Pitch > 12 {
+	if s.Generation == 0 || s.Sequence == 0 || s.Source == "" || s.StartFrame < 0 || s.EndFrame <= s.StartFrame || s.OutputStart < 0 || s.OutputEnd <= s.OutputStart || math.IsNaN(s.Speed) || math.IsInf(s.Speed, 0) || s.Speed < .25 || s.Speed > 2 || math.IsNaN(s.Pitch) || math.IsInf(s.Pitch, 0) || s.Pitch < -12 || s.Pitch > 12 || s.EdgeFadeFrames < 0 || s.EdgeFadeFrames > s.OutputEnd-s.OutputStart {
 		return nil, errors.New("invalid traversal schedule")
 	}
 	return &Traversal{schedule: s, consumed: s.OutputStart}, nil

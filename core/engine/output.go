@@ -20,6 +20,9 @@ type Schedule struct {
 	StartFrame, EndFrame   int64
 	OutputStart, OutputEnd int64
 	Speed, Pitch           float64
+	// EdgeFadeFrames requests independent linear gain ramps at both ends.
+	// The adapter does not overlap, shorten, or expand the source selection.
+	EdgeFadeFrames int64
 }
 type OutputAcknowledgement struct {
 	Generation          uint64

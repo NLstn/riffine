@@ -175,3 +175,9 @@ ends when device start returns and excludes core hashing, process startup and
 hardware presentation. A conservative backend buffer drain is not a hardware
 clock. Live transport remains false. See
 [the preview validation record](validation/streaming-preview.md).
+
+The experimental `engine.Transport` control API provides versioned commands,
+loading/ready/playing/paused/stopped/error snapshots and acknowledged traversal
+events. Its host contract and reset/count policies are documented in
+[core transport validation](validation/core-transport.md). Production sessions
+retain `liveTransport: false` until a presentation-aware device adapter is connected.

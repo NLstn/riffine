@@ -51,6 +51,7 @@ type Step struct {
 	Error    practice.ErrorCode `json:"error,omitempty"`
 }
 type Report struct {
+	Transport         TransportReport             `json:"transport"`
 	Version           int                         `json:"version"`
 	OK                bool                        `json:"ok"`
 	Error             string                      `json:"error,omitempty"`
@@ -198,7 +199,8 @@ func execute(input string) (r Report, err error) {
 	if r.LoopCompletion == nil || !r.DuplicateIgnored || !r.StaleIgnored || !r.ResourceOwnership {
 		return r, errors.New("acknowledgement/resource contract differs")
 	}
-	return r, nil
+	r.Transport, err = transportConformance(ctx, r.Render, session.Snapshot().Project.Track.Audio.Frames, session.Snapshot().Project.Track.Audio.SampleRate)
+	return r, err
 }
 
 type memory struct {
