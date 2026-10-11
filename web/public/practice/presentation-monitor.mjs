@@ -2,10 +2,10 @@ import { PresentationReader, TimelineError } from './presentation-timeline.mjs';
 // Control-thread sampling only. The timer requests fresh device timestamps; it
 // never advances audio position, estimates missing frames or extrapolates time.
 export class PresentationMonitor {
- constructor(context, timeline, onError) {
+ constructor(context, timeline, onError, onProgress, onSample) {
   if (typeof context.getOutputTimestamp !== 'function') throw new TimelineError('Output timestamps are unavailable.');
   this.context = context; this.reader = new PresentationReader(timeline, context.sampleRate);
-  this.onError = onError; this.target = undefined; this.failure = undefined;
+  this.onError = onError; this.onProgress = onProgress; this.onSample = onSample; this.target = undefined; this.failure = undefined;
   this.closed = false; this.progressAt = performance.now(); this.frames = 0;
   this.timer = setInterval(() => this.sample(), 20);
  }
@@ -13,7 +13,8 @@ export class PresentationMonitor {
   if (this.closed || this.failure) return;
   try {
    const frames = this.reader.observe(this.context.getOutputTimestamp());
-   if (frames !== this.frames) { this.frames = frames; this.progressAt = performance.now(); }
+   if (frames !== this.frames) { this.frames = frames; this.progressAt = performance.now(); this.onProgress?.(frames); }
+   this.onSample?.(frames);
    if (this.target !== undefined) {
     if (frames > this.target) throw new TimelineError('Presented audio exceeds the preview output.');
     if (frames === this.target) { this.resolve?.(frames); this.resolve = undefined; this.reject = undefined; this.target = undefined; }
