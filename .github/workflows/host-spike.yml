@@ -116,6 +116,7 @@ jobs:
           sh scripts/build-wasm-dsp-spike.sh
           sh scripts/build-browser-dsp.sh
           node scripts/check-browser-selection.mjs build/wasm-dsp-native/selection-probe > build/browser-dsp/metrics.json
+          node scripts/check-browser-schedules.mjs > build/browser-dsp/schedules.json
           sh scripts/build-browser-practice.sh
           go run ./cmd/riffine tone --out build/browser-conformance.wav --seconds 1
           node scripts/check-browser-preview.mjs > build/browser-dsp/preview.json
@@ -128,4 +129,5 @@ jobs:
             build/wasm-dsp/metrics.json
             build/browser-dsp/metrics.json
             build/browser-dsp/preview.json
+            build/browser-dsp/schedules.json
           if-no-files-found: warn
