@@ -51,7 +51,7 @@ func TestVersionOneMigration(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if migrated.Version != 2 || migrated.Settings != p.Settings || migrated.Track != p.Track || len(migrated.Annotations.Regions) != 1 || migrated.Annotations.Regions[0].Start != .25 || migrated.Annotations.Loops[0].RegionID != "region-v1-loop" || !bytes.Equal(b, before) {
+	if migrated.Version != Version || migrated.Settings != p.Settings || migrated.Track != p.Track || len(migrated.Annotations.Regions) != 1 || migrated.Annotations.Regions[0].Start != .25 || migrated.Annotations.Loops[0].RegionID != "region-v1-loop" || !bytes.Equal(b, before) {
 		t.Fatal(migrated)
 	}
 	again, e := Decode(bytes.NewReader(b))

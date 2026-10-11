@@ -15,7 +15,7 @@ func TestSharedFixtureHarness(t *testing.T) {
 	if err = json.Unmarshal([]byte(Run(string(fixture))), &report); err != nil {
 		t.Fatal(err)
 	}
-	if !report.OK || !report.Cancellation || !report.ResourceOwnership || !report.AnnotationsRoundTrip || report.LoopCompletion == nil || report.Transport.Completed.CompletedLoops != 1 || len(report.Transport.Events) != 1 {
+	if !report.OK || !report.Cancellation || !report.ResourceOwnership || !report.AnnotationsRoundTrip || report.LoopCompletion == nil || report.Transport.Completed.CompletedLoops != 1 || len(report.Transport.Events) != 1 || len(report.Ladder.Events) != 36 || report.Ladder.Final.Plan == nil || report.Ladder.Final.Plan.CompletedLoops != 36 {
 		t.Fatalf("harness failed: %+v", report)
 	}
 	// Repeated independent runs must emit byte-identical portable reports.

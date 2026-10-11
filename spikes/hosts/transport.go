@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/NLstn/riffine/core/engine"
+	"github.com/NLstn/riffine/core/ladder"
 )
 
 // All transport decisions execute in Go, including in the WASM worker and C
@@ -79,6 +80,54 @@ func transportConformance(ctx context.Context, q engine.RenderRequest, frames in
 	result.Events = tr.DrainEvents()
 	if result.Paused.State != "paused" || result.Paused.SourceFrame <= q.StartFrame || result.Resumed.State != "playing" || result.Completed.CompletedLoops != 1 || len(result.Events) != 1 {
 		return result, errors.New("shared transport conformance differs")
+	}
+	return result, nil
+}
+
+type LadderReport struct {
+	Events []engine.TransportEvent  `json:"events"`
+	Final  engine.TransportSnapshot `json:"final"`
+}
+
+func ladderConformance(ctx context.Context, q engine.RenderRequest, frames int64, rate int) (LadderReport, error) {
+	var result LadderReport
+	device := &transportOutput{}
+	tr, err := engine.NewTransport(device)
+	if err != nil {
+		return result, err
+	}
+	err = tr.Load(ctx, engine.TransportConfig{Source: q.Source, Frames: frames, SampleRate: rate, OutputRate: rate, Speed: q.Speed, Pitch: q.Pitch, LoopEnabled: true, LoopStart: q.StartFrame, LoopEnd: q.EndFrame})
+	if err != nil {
+		return result, err
+	}
+	definition := ladder.Definition{StartSpeed: .6, TargetSpeed: 1, IncrementPoints: 5, LoopsPerStep: 4, EndBehavior: "stop"}
+	_, err = tr.Dispatch(ctx, engine.TransportCommand{Version: 1, Sequence: 1, Type: "set_plan", Plan: &definition})
+	if err != nil {
+		return result, err
+	}
+	_, err = tr.Dispatch(ctx, engine.TransportCommand{Version: 1, Sequence: 2, Type: "play"})
+	if err != nil {
+		return result, err
+	}
+	compiled, _ := ladder.Compile(definition)
+	for i := 0; i < 36; i++ {
+		if len(device.schedules) <= i {
+			return result, errors.New("ladder schedule missing")
+		}
+		s := device.schedules[i]
+		want, _ := compiled.SpeedForLoop(uint64(i + 1))
+		if s.Speed != want || s.Pitch != q.Pitch {
+			return result, errors.New("ladder boundary parameters differ")
+		}
+		device.acks = []engine.OutputAcknowledgement{{Generation: s.Generation, Sequence: s.Sequence, ConsumedOutputFrame: s.OutputEnd}, {Generation: s.Generation, Sequence: s.Sequence, ConsumedOutputFrame: s.OutputEnd}}
+		result.Final, err = tr.Poll(ctx)
+		if err != nil {
+			return result, err
+		}
+		result.Events = append(result.Events, tr.DrainEvents()...)
+	}
+	if result.Final.State != "stopped" || result.Final.Plan == nil || result.Final.Plan.CompletedLoops != 36 || len(result.Events) != 36 || len(device.schedules) != 36 {
+		return result, errors.New("ladder completion trace differs")
 	}
 	return result, nil
 }

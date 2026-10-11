@@ -59,7 +59,11 @@ func (a Annotations) Clone() Annotations {
 	a.Bookmarks = slices.Clone(a.Bookmarks)
 	return a
 }
-func (p Project) Clone() Project { p.Annotations = p.Annotations.Clone(); return p }
+func (p Project) Clone() Project {
+	p.Annotations = p.Annotations.Clone()
+	p.PracticePlans = ClonePlans(p.PracticePlans)
+	return p
+}
 func (a Annotations) validate(duration float64, rate int) error {
 	if !utf8.ValidString(a.Notes) || len(a.Notes) > MaxNoteBytes || len(a.Regions)+len(a.Markers)+len(a.Loops)+len(a.Bookmarks) > MaxAnnotations {
 		return errors.New("annotation count or note size exceeds limit")

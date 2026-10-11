@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"github.com/NLstn/riffine/core/ladder"
 	"math"
 	"sync"
 )
@@ -39,13 +40,14 @@ type TransportConfig struct {
 	LoopEnd     int64   `json:"loopEnd"`
 }
 type TransportCommand struct {
-	Version  int            `json:"version"`
-	Sequence uint64         `json:"sequence"`
-	Type     string         `json:"type"`
-	Position *int64         `json:"position,omitempty"`
-	Speed    *float64       `json:"speed,omitempty"`
-	Pitch    *float64       `json:"pitch,omitempty"`
-	Loop     *TransportLoop `json:"loop,omitempty"`
+	Version  int                `json:"version"`
+	Sequence uint64             `json:"sequence"`
+	Type     string             `json:"type"`
+	Position *int64             `json:"position,omitempty"`
+	Speed    *float64           `json:"speed,omitempty"`
+	Pitch    *float64           `json:"pitch,omitempty"`
+	Loop     *TransportLoop     `json:"loop,omitempty"`
+	Plan     *ladder.Definition `json:"plan,omitempty"`
 }
 type TransportLoop struct {
 	Enabled    bool  `json:"enabled"`
@@ -53,23 +55,26 @@ type TransportLoop struct {
 	EndFrame   int64 `json:"endFrame"`
 }
 type TransportSnapshot struct {
-	Version             int             `json:"version"`
-	Sequence            uint64          `json:"sequence"`
-	Generation          uint64          `json:"generation"`
-	State               string          `json:"state"`
-	SourceFrame         int64           `json:"sourceFrame"`
-	ConsumedOutputFrame int64           `json:"consumedOutputFrame"`
-	CompletedLoops      uint64          `json:"completedLoops"`
-	Config              TransportConfig `json:"config"`
-	Error               string          `json:"error,omitempty"`
+	Version             int              `json:"version"`
+	Sequence            uint64           `json:"sequence"`
+	Generation          uint64           `json:"generation"`
+	State               string           `json:"state"`
+	SourceFrame         int64            `json:"sourceFrame"`
+	ConsumedOutputFrame int64            `json:"consumedOutputFrame"`
+	CompletedLoops      uint64           `json:"completedLoops"`
+	Config              TransportConfig  `json:"config"`
+	Error               string           `json:"error,omitempty"`
+	Plan                *ladder.Snapshot `json:"plan,omitempty"`
 }
 type TransportEvent struct {
-	Type           string `json:"type"`
-	Generation     uint64 `json:"generation"`
-	Sequence       uint64 `json:"sequence"` // schedule sequence, independent of commands
-	CompletedLoops uint64 `json:"completedLoops"`
-	StartFrame     int64  `json:"startFrame"`
-	EndFrame       int64  `json:"endFrame"`
+	Type           string  `json:"type"`
+	Generation     uint64  `json:"generation"`
+	Sequence       uint64  `json:"sequence"` // schedule sequence, independent of commands
+	CompletedLoops uint64  `json:"completedLoops"`
+	StartFrame     int64   `json:"startFrame"`
+	EndFrame       int64   `json:"endFrame"`
+	Speed          float64 `json:"speed"`
+	Pitch          float64 `json:"pitch"`
 }
 type plannedTraversal struct {
 	schedule Schedule
@@ -87,6 +92,8 @@ type Transport struct {
 	snapshot         TransportSnapshot
 	plans            []plannedTraversal
 	resumeEligible   bool
+	planRun          *ladder.Run
+	autoResumePlan   bool
 	scheduleSequence uint64
 	events           []TransportEvent
 }
@@ -106,7 +113,19 @@ func validateTransport(c TransportConfig) error {
 	}
 	return nil
 }
-func (t *Transport) Snapshot() TransportSnapshot { t.mu.Lock(); defer t.mu.Unlock(); return t.snapshot }
+func (t *Transport) Snapshot() TransportSnapshot {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.currentSnapshot()
+}
+func (t *Transport) currentSnapshot() TransportSnapshot {
+	s := t.snapshot
+	if t.planRun != nil {
+		progress := t.planRun.Snapshot()
+		s.Plan = &progress
+	}
+	return s
+}
 func (t *Transport) fail(err error) error {
 	t.snapshot.State = "error"
 	t.snapshot.Error = err.Error()
@@ -160,6 +179,7 @@ func (t *Transport) Load(ctx context.Context, c TransportConfig) error {
 	t.snapshot.SourceFrame, _ = t.bounds()
 	t.events = nil
 	t.resumeEligible = true
+	t.planRun = nil
 	return nil
 }
 func (t *Transport) plan(ctx context.Context, start int64, eligible bool) error {
@@ -175,7 +195,21 @@ func (t *Transport) plan(ctx context.Context, start int64, eligible bool) error 
 		outputStart = t.plans[len(t.plans)-1].schedule.OutputEnd
 	}
 	c := t.snapshot.Config
-	frames := int64(math.Round(float64(end-start) * float64(c.OutputRate) / float64(c.SampleRate) / c.Speed))
+	speed := c.Speed
+	if t.planRun != nil && t.planRun.Snapshot().State == "running" {
+		ordinal := t.planRun.Snapshot().CompletedLoops + 1
+		for _, p := range t.plans {
+			if p.eligible {
+				ordinal++
+			}
+		}
+		var play bool
+		speed, play = t.planRun.Plan().SpeedForLoop(ordinal)
+		if !play {
+			return nil
+		}
+	}
+	frames := int64(math.Round(float64(end-start) * float64(c.OutputRate) / float64(c.SampleRate) / speed))
 	if frames < 1 {
 		frames = 1
 	}
@@ -183,7 +217,7 @@ func (t *Transport) plan(ctx context.Context, start int64, eligible bool) error 
 		return t.fail(errors.New("output timeline exhausted"))
 	}
 	t.scheduleSequence++
-	s := Schedule{Generation: t.snapshot.Generation, Sequence: t.scheduleSequence, Source: c.Source, StartFrame: start, EndFrame: end, OutputStart: outputStart, OutputEnd: outputStart + frames, Speed: c.Speed, Pitch: c.Pitch}
+	s := Schedule{Generation: t.snapshot.Generation, Sequence: t.scheduleSequence, Source: c.Source, StartFrame: start, EndFrame: end, OutputStart: outputStart, OutputEnd: outputStart + frames, Speed: speed, Pitch: c.Pitch}
 	s.EdgeFadeFrames = min(int64(c.OutputRate/200), (frames+1)/2)
 	gate, err := NewTraversal(s)
 	if err != nil {
@@ -204,8 +238,12 @@ func (t *Transport) fill(ctx context.Context, eligible bool) error {
 	if t.snapshot.Config.LoopEnabled {
 		start, _ := t.bounds()
 		for len(t.plans) < 2 {
+			before := len(t.plans)
 			if err := t.plan(ctx, start, true); err != nil {
 				return err
+			}
+			if len(t.plans) == before {
+				break
 			}
 		}
 	}
@@ -216,7 +254,13 @@ func (t *Transport) acknowledge(acks []OutputAcknowledgement) error {
 		return t.fail(errors.New("adapter acknowledgement batch exceeds bound"))
 	}
 	for _, a := range acks {
-		if a.Generation != t.snapshot.Generation || len(t.plans) == 0 {
+		if a.Generation != t.snapshot.Generation {
+			continue
+		}
+		if len(t.plans) == 0 {
+			if a.Sequence > t.scheduleSequence {
+				return t.fail(errors.New("acknowledgement references unscheduled output"))
+			}
 			continue
 		}
 		p := t.plans[0]
@@ -231,6 +275,7 @@ func (t *Transport) acknowledge(acks []OutputAcknowledgement) error {
 		if err != nil {
 			return t.fail(err)
 		}
+		t.snapshot.Config.Speed = s.Speed
 		t.snapshot.ConsumedOutputFrame = a.ConsumedOutputFrame
 		t.resumeEligible = p.eligible && a.ConsumedOutputFrame == s.OutputStart
 		// Interpolate using this schedule's exact rounded output length, including
@@ -247,8 +292,13 @@ func (t *Transport) acknowledge(acks []OutputAcknowledgement) error {
 						return t.fail(errors.New("loop counter exhausted"))
 					}
 					t.snapshot.CompletedLoops++
+					if t.planRun != nil {
+						if _, err := t.planRun.Complete(s.Generation, s.Sequence); err != nil {
+							return t.fail(err)
+						}
+					}
 				}
-				t.events = append(t.events, TransportEvent{Type: "traversal_completed", Generation: s.Generation, Sequence: s.Sequence, CompletedLoops: t.snapshot.CompletedLoops, StartFrame: s.StartFrame, EndFrame: s.EndFrame})
+				t.events = append(t.events, TransportEvent{Type: "traversal_completed", Generation: s.Generation, Sequence: s.Sequence, CompletedLoops: t.snapshot.CompletedLoops, StartFrame: s.StartFrame, EndFrame: s.EndFrame, Speed: s.Speed, Pitch: s.Pitch})
 			}
 			t.plans = t.plans[1:]
 			if t.snapshot.Config.LoopEnabled {
@@ -256,6 +306,9 @@ func (t *Transport) acknowledge(acks []OutputAcknowledgement) error {
 				t.resumeEligible = true
 			}
 		}
+	}
+	if len(t.plans) > 0 {
+		t.snapshot.Config.Speed = t.plans[0].schedule.Speed
 	}
 	return nil
 }
@@ -273,32 +326,35 @@ func (t *Transport) Poll(ctx context.Context) (TransportSnapshot, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return t.snapshot, err
+		return t.currentSnapshot(), err
 	}
 	if t.snapshot.State != "playing" {
-		return t.snapshot, nil
+		return t.currentSnapshot(), nil
 	}
 	acks, err := t.device.DrainAcknowledgements(ctx, transportEventCapacity)
 	if err != nil {
-		return t.snapshot, t.fail(err)
+		return t.currentSnapshot(), t.fail(err)
 	}
 	if err = t.acknowledge(acks); err != nil {
 		_, stopErr := t.device.Suspend(ctx)
-		return t.snapshot, errors.Join(err, stopErr)
+		return t.currentSnapshot(), errors.Join(err, stopErr)
 	}
-	if len(t.plans) == 0 && !t.snapshot.Config.LoopEnabled {
+	if len(t.plans) == 0 && (!t.snapshot.Config.LoopEnabled || t.planRun != nil && t.planRun.Snapshot().State == "completed") {
 		if err = t.suspend(ctx); err != nil {
-			return t.snapshot, err
+			return t.currentSnapshot(), err
 		}
 		t.snapshot.State = "stopped"
-		return t.snapshot, nil
+		return t.currentSnapshot(), nil
+	}
+	if len(t.plans) > 0 {
+		t.snapshot.Config.Speed = t.plans[0].schedule.Speed
 	}
 	err = t.fill(ctx, true)
 	if err != nil {
 		_, stopErr := t.device.Suspend(ctx)
-		return t.snapshot, errors.Join(err, stopErr)
+		return t.currentSnapshot(), errors.Join(err, stopErr)
 	}
-	return t.snapshot, nil
+	return t.currentSnapshot(), nil
 }
 func (t *Transport) DrainEvents() []TransportEvent {
 	t.mu.Lock()
@@ -314,9 +370,9 @@ func (t *Transport) DrainEvents() []TransportEvent {
 func (t *Transport) Dispatch(ctx context.Context, c TransportCommand) (TransportSnapshot, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	reject := func(message string) (TransportSnapshot, error) { return t.snapshot, errors.New(message) }
+	reject := func(message string) (TransportSnapshot, error) { return t.currentSnapshot(), errors.New(message) }
 	if err := ctx.Err(); err != nil {
-		return t.snapshot, err
+		return t.currentSnapshot(), err
 	}
 	if c.Version != TransportVersion || c.Sequence == 0 || t.snapshot.Sequence == math.MaxUint64 || c.Sequence != t.snapshot.Sequence+1 {
 		return reject("invalid transport command version or sequence")
@@ -341,8 +397,11 @@ func (t *Transport) Dispatch(ctx context.Context, c TransportCommand) (Transport
 	if c.Loop != nil {
 		supplied++
 	}
+	if c.Plan != nil {
+		supplied++
+	}
 	switch c.Type {
-	case "play", "pause", "stop", "restart", "recover":
+	case "play", "pause", "stop", "restart", "recover", "resume_plan", "clear_plan":
 		if supplied != 0 {
 			return reject("unexpected transport command fields")
 		}
@@ -355,7 +414,7 @@ func (t *Transport) Dispatch(ctx context.Context, c TransportCommand) (Transport
 			return reject("seek must remain within the active selection")
 		}
 	case "set_parameters":
-		if c.Position != nil || c.Loop != nil || supplied == 0 {
+		if c.Plan != nil || c.Position != nil || c.Loop != nil || supplied == 0 {
 			return reject("parameters require speed or pitch")
 		}
 		if c.Speed != nil {
@@ -371,11 +430,18 @@ func (t *Transport) Dispatch(ctx context.Context, c TransportCommand) (Transport
 		next.LoopEnabled = c.Loop.Enabled
 		next.LoopStart = c.Loop.StartFrame
 		next.LoopEnd = c.Loop.EndFrame
+	case "set_plan":
+		if supplied != 1 || c.Plan == nil || !next.LoopEnabled {
+			return reject("set_plan requires an enabled loop and plan only")
+		}
+		if _, err := ladder.Compile(*c.Plan); err != nil {
+			return t.currentSnapshot(), err
+		}
 	default:
 		return reject("unsupported transport command")
 	}
 	if err := validateTransport(next); err != nil {
-		return t.snapshot, err
+		return t.currentSnapshot(), err
 	}
 	if c.Type == "recover" && t.snapshot.State != "error" {
 		return reject("recovery requires an error")
@@ -383,14 +449,27 @@ func (t *Transport) Dispatch(ctx context.Context, c TransportCommand) (Transport
 	if c.Type == "play" && t.snapshot.State == "playing" || c.Type == "pause" && t.snapshot.State != "playing" {
 		return reject("command is invalid in the current transport state")
 	}
+	if c.Type == "resume_plan" && (t.planRun == nil || t.planRun.Snapshot().State != "paused" || !next.LoopEnabled) {
+		return reject("resume_plan requires a paused plan and enabled loop")
+	}
+	if c.Type == "play" && t.planRun != nil && t.planRun.Snapshot().State == "completed" {
+		return reject("completed plan requires restart or clear_plan")
+	}
 	wasPlaying := t.snapshot.State == "playing"
 	if wasPlaying {
 		if err := t.suspend(ctx); err != nil {
-			return t.snapshot, err
+			return t.currentSnapshot(), err
 		}
 	}
+	if t.planRun != nil && t.planRun.Snapshot().State == "completed" && c.Type == "set_parameters" {
+		wasPlaying = false
+		t.snapshot.State = "stopped"
+	}
+	if c.Speed == nil {
+		next.Speed = t.snapshot.Config.Speed
+	}
 	if err := t.reset(ctx); err != nil {
-		return t.snapshot, err
+		return t.currentSnapshot(), err
 	}
 	t.snapshot.Config = next
 	start, end := t.bounds()
@@ -428,16 +507,69 @@ func (t *Transport) Dispatch(ctx context.Context, c TransportCommand) (Transport
 			t.snapshot.State = "playing"
 		}
 	}
+	if c.Type == "clear_plan" {
+		t.planRun = nil
+	}
+	if c.Type == "set_plan" {
+		plan, _ := ladder.Compile(*c.Plan)
+		t.planRun, _ = ladder.Start(plan, t.snapshot.Generation)
+		t.snapshot.SourceFrame = start
+		t.resumeEligible = true
+		t.snapshot.CompletedLoops = 0
+		t.snapshot.Config.Speed = plan.Definition().StartSpeed
+		t.autoResumePlan = true
+		if !wasPlaying {
+			t.planRun.Pause()
+		}
+	} else if t.planRun != nil {
+		generation := t.snapshot.Generation
+		switch c.Type {
+		case "restart", "seek", "set_loop", "stop", "recover":
+			if err := t.planRun.Restart(generation); err != nil {
+				return t.currentSnapshot(), t.fail(err)
+			}
+			t.snapshot.Config.Speed = t.planRun.Plan().Definition().StartSpeed
+			t.autoResumePlan = true
+			if t.snapshot.State != "playing" || !t.snapshot.Config.LoopEnabled {
+				t.planRun.Pause()
+			}
+		case "pause":
+			t.planRun.Pause()
+			if err := t.planRun.Rebind(generation); err != nil {
+				return t.currentSnapshot(), t.fail(err)
+			}
+		case "play", "resume_plan":
+			if c.Type == "resume_plan" || t.autoResumePlan && t.snapshot.Config.LoopEnabled && t.planRun.Snapshot().State == "paused" {
+				if err := t.planRun.Resume(generation); err != nil {
+					return t.currentSnapshot(), t.fail(err)
+				}
+				t.snapshot.Config.Speed = t.planRun.Snapshot().Speed
+				t.autoResumePlan = true
+			} else {
+				if err := t.planRun.Rebind(generation); err != nil {
+					return t.currentSnapshot(), t.fail(err)
+				}
+			}
+		default:
+			if c.Type == "set_parameters" && c.Speed != nil {
+				t.planRun.Pause()
+				t.autoResumePlan = false
+			}
+			if err := t.planRun.Rebind(generation); err != nil {
+				return t.currentSnapshot(), t.fail(err)
+			}
+		}
+	}
 	if t.snapshot.State == "playing" {
 		// Any interrupted partial traversal remains ineligible after resume/edit.
 		eligible := t.resumeEligible && t.snapshot.SourceFrame == start
 		if err := t.fill(ctx, eligible); err != nil {
-			return t.snapshot, err
+			return t.currentSnapshot(), err
 		}
 		if err := t.device.Start(ctx); err != nil {
-			return t.snapshot, t.fail(err)
+			return t.currentSnapshot(), t.fail(err)
 		}
 	}
 	t.snapshot.Sequence = c.Sequence
-	return t.snapshot, nil
+	return t.currentSnapshot(), nil
 }

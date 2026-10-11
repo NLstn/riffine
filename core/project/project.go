@@ -13,7 +13,7 @@ import (
 	"github.com/NLstn/riffine/core/audio"
 )
 
-const Version = 2
+const Version = 3
 
 type Loop struct {
 	Enabled bool    `json:"enabled"`
@@ -30,11 +30,12 @@ type Track struct {
 	Audio audio.Info `json:"audio"`
 }
 type Project struct {
-	Version     int         `json:"version"`
-	Name        string      `json:"name"`
-	Track       Track       `json:"track"`
-	Settings    Settings    `json:"settings"`
-	Annotations Annotations `json:"annotations"`
+	Version       int            `json:"version"`
+	Name          string         `json:"name"`
+	Track         Track          `json:"track"`
+	Settings      Settings       `json:"settings"`
+	Annotations   Annotations    `json:"annotations"`
+	PracticePlans []PracticePlan `json:"practicePlans,omitempty"`
 }
 
 func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
@@ -67,10 +68,13 @@ func (p Project) Validate() error {
 	if l.Enabled && (l.End-l.Start)*float64(i.SampleRate) < 1 {
 		return errors.New("enabled loop must contain at least one frame")
 	}
-	return p.Annotations.validate(i.Duration(), i.SampleRate)
+	if err := p.Annotations.validate(i.Duration(), i.SampleRate); err != nil {
+		return err
+	}
+	return p.validatePlans()
 }
 
-// New builds a version-2 document. Reference is a host-produced locator;
+// New builds a version-3 document. Reference is a host-produced locator;
 // content identity is the fingerprint and metadata, never the locator.
 func New(name, reference string, info audio.Info) (Project, error) {
 	info.DataOffset, info.DataBytes = 0, 0 // Decoder cursor details are not document metadata.
@@ -95,8 +99,8 @@ func Decode(r io.Reader) (Project, error) {
 	if err = json.Unmarshal(b, &header); err != nil {
 		return Project{}, err
 	}
-	if header.Version != 1 && header.Version != Version {
-		return Project{}, fmt.Errorf("unsupported project version %d (supported: 1 and %d)", header.Version, Version)
+	if header.Version != 1 && header.Version != 2 && header.Version != Version {
+		return Project{}, fmt.Errorf("unsupported project version %d (supported: 1, 2 and %d)", header.Version, Version)
 	}
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
@@ -117,6 +121,18 @@ func Decode(r io.Reader) (Project, error) {
 			p.Annotations.Regions = []Region{{ID: "region-v1-loop", Label: "Saved loop", Start: old.Settings.Loop.Start, End: old.Settings.Loop.End}}
 			p.Annotations.Loops = []NamedLoop{{ID: "loop-v1", Label: "Saved loop", RegionID: "region-v1-loop"}}
 		}
+	} else if header.Version == 2 {
+		var old struct {
+			Version     int         `json:"version"`
+			Name        string      `json:"name"`
+			Track       Track       `json:"track"`
+			Settings    Settings    `json:"settings"`
+			Annotations Annotations `json:"annotations"`
+		}
+		if err = dec.Decode(&old); err != nil {
+			return Project{}, err
+		}
+		p = Project{Version: Version, Name: old.Name, Track: old.Track, Settings: old.Settings, Annotations: old.Annotations}
 	} else {
 		if err = dec.Decode(&p); err != nil {
 			return Project{}, err
