@@ -110,6 +110,8 @@ jobs:
         run: |
           source "$RUNNER_TEMP/riffine-emsdk/emsdk_env.sh"
           sh scripts/build-wasm-dsp-spike.sh
+          sh scripts/build-browser-dsp.sh
+          node scripts/check-browser-selection.mjs build/wasm-dsp-native/selection-probe > build/browser-dsp/metrics.json
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -117,4 +119,5 @@ jobs:
           path: |
             build/wasm-dsp/report.json
             build/wasm-dsp/metrics.json
+            build/browser-dsp/metrics.json
           if-no-files-found: warn
