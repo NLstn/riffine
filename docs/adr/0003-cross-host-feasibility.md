@@ -65,3 +65,11 @@ Keep issue #13 open until those acceptance checks are recorded. This initial
 harness slice can merge independently with these limits documented. Do not lock a desktop shell, promise mobile/browser audio delivery, or
 claim production bindings from build-only evidence. If Android or C++ WASM cannot
 meet their constraints, revise the bridge/processing boundary before client work.
+
+
+## Architecture acceptance follow-up
+
+The executed mobile/runtime and shared C++ WASM follow-ups supersede the original
+missing-SDK/runtime observations. [ADR 0005](0005-measured-host-bindings.md)
+records the measured binding decisions and completes #13's feasibility scope.
+Production application/audio/lifecycle gates remain on their respective issues.

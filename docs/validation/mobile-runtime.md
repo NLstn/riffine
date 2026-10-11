@@ -77,3 +77,11 @@ were 6.489/4.459 ms (library 4,522,320 bytes); iOS first/median were
 The run retained report/metrics artifacts. These whole-fixture observations are
 not per-command budgets, real-device playback or lifecycle acceptance. Android
 arm64 was built in CI but remains unexecuted on physical hardware.
+
+
+## Architecture acceptance follow-up
+
+The executed mobile/runtime and shared C++ WASM follow-ups supersede the original
+missing-SDK/runtime observations. [ADR 0005](../adr/0005-measured-host-bindings.md)
+records the measured binding decisions and completes #13's feasibility scope.
+Production application/audio/lifecycle gates remain on their respective issues.
