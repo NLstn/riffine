@@ -69,6 +69,51 @@ Result run(double speed,double pitch) {
   riffine_selection_destroy(selection);return result;
  } catch(...) {trackAllocations=false;riffine_selection_destroy(selection);throw;}
 }
+std::vector<float> faded(uint64_t frames,unsigned rate,int64_t fade) {
+ riffine_selection *selection=nullptr;
+ ok(riffine_selection_create(1,rate,frames,1,0,&selection,error,sizeof(error)));
+ try {
+  if(fade>=0) {
+   check(riffine_selection_set_edge_fade_frames(selection,(frames+1)/2+1,error,sizeof(error)),"oversized fade accepted");
+   ok(riffine_selection_set_edge_fade_frames(selection,uint64_t(fade),error,sizeof(error)));
+  }
+  std::vector<float> result(size_t(frames),0);float input[512]{},output[113]{};
+  uint64_t read=0,written=0;uint32_t count=0,needsInput=0;
+  allocations=0;trackAllocations=true;
+  for(;;) {
+   ok(riffine_selection_read(selection,output,113,&count,&needsInput,error,sizeof(error)));
+   check(written+count<=frames,"fade changed output duration");
+   std::copy(output,output+count,result.data()+written);written+=count;
+   if(needsInput) {
+    auto block=uint32_t(std::min<uint64_t>(512,frames-read));
+    for(uint32_t i=0;i<block;++i) input[i]=float(.2*std::cos(2*3.141592653589793*440*double(read+i)/rate));
+    ok(riffine_selection_push(selection,input,block,error,sizeof(error)));read+=block;
+    // Error path may allocate an exception; separately verify its nonmutation.
+    trackAllocations=false;
+    check(riffine_selection_set_edge_fade_frames(selection,0,error,sizeof(error)),"fade changed after processing");
+    trackAllocations=true;
+   } else if(!count) break;
+  }
+  trackAllocations=false;check(!allocations,"scheduled fade processing allocated");
+  check(written==frames && read==frames,"scheduled fade changed counts");
+  riffine_selection_destroy(selection);return result;
+ } catch(...) {trackAllocations=false;riffine_selection_destroy(selection);throw;}
+}
+void scheduledFades() {
+ for(unsigned rate: {8000u,44100u,48000u,192000u}) for(uint64_t frames: {uint64_t(1),uint64_t(2),uint64_t(3),uint64_t(4095)}) {
+  auto baseline=faded(frames,rate,0);
+  auto fade=std::min<uint64_t>(rate/200,(frames+1)/2);
+  auto explicitFade=faded(frames,rate,int64_t(fade));
+  auto defaults=faded(frames,rate,-1);
+  auto defaultFade=std::min<uint64_t>(uint64_t(std::llround(rate*.005)),frames/2);
+  for(uint64_t i=0;i<frames;++i) {
+   auto gain=[&](uint64_t length) {return length ? std::min({1.,double(i)/length,double(frames-1-i)/length}) : 1.;};
+   check(std::abs(explicitFade[size_t(i)]-baseline[size_t(i)]*gain(fade))<2e-7,"scheduled fade gain mismatch");
+   check(std::abs(defaults[size_t(i)]-baseline[size_t(i)]*gain(defaultFade))<2e-7,"default preview fade changed");
+  }
+ }
+ check(riffine_selection_set_edge_fade_frames(nullptr,0,error,sizeof(error)),"null fade selection accepted");
+}
 void edgeCases() {
  riffine_selection *selection=nullptr;
  check(riffine_selection_create(2,48000,0,1,0,&selection,error,sizeof(error)) && !selection,"empty selection accepted");
@@ -87,7 +132,7 @@ void edgeCases() {
 }
 int main() {
  try {
-  edgeCases();const double speeds[]={.25,.5,.75,1.3,2},pitches[]={0,-12,3,7,12};Result results[5]{};
+  edgeCases();scheduledFades();const double speeds[]={.25,.5,.75,1.3,2},pitches[]={0,-12,3,7,12};Result results[5]{};
   for(unsigned i=0;i<5;++i) results[i]=run(speeds[i],pitches[i]);
   std::printf("{\"version\":1,\"sampleRate\":48000,\"channels\":2,\"sourceFrames\":48000,\"cases\":[");
   for(unsigned i=0;i<5;++i) {

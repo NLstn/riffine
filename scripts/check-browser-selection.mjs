@@ -62,6 +62,20 @@ async function run(speed, pitch) {
  await call('close'); await call('close');
  return { speed, pitch, outputFrames: written, frequency: crossings.map(n => n * 48000 / measured), rms: energy.map(n => Math.sqrt(n / measured)) };
 }
+async function faded(frames, sampleRate, edgeFadeFrames) {
+ await call('create', {channels: 1, sampleRate, sourceFrames: frames, speed: 1, pitch: 0, edgeFadeFrames});
+ const result = new Float32Array(frames); let read = 0, written = 0;
+ for (;;) {
+  const block = await call('read', {capacity: 113});
+  result.set(block.pcm, written); written += block.frames;
+  if (block.needsInput) {
+   const count = Math.min(512, frames - read), pcm = new Float32Array(count);
+   for (let i = 0; i < count; i++) pcm[i] = .2 * Math.cos(2 * Math.PI * 440 * (read + i) / sampleRate);
+   await call('push', {pcm}, [pcm.buffer]); read += count;
+  } else if (!block.frames) break;
+ }
+ assert.equal(read, frames); assert.equal(written, frames); await call('close'); return result;
+}
 try {
  const initial = await ready;
  assert.equal(initial.heapBytes, 33554432);
@@ -78,6 +92,19 @@ try {
  // A huge coordinate range must not allocate storage proportional to duration.
  const huge = await call('create', { channels: 2, sampleRate: 48000, sourceFrames: 2 ** 40, speed: .25, pitch: 0 });
  assert.equal(huge.outputFrames, 2 ** 42); await call('close');
+ for (const sampleRate of [8000, 44100, 48000, 192000]) for (const frames of [1, 2, 3, 4095]) {
+  const baseline = await faded(frames, sampleRate, 0);
+  const fade = Math.min(Math.floor(sampleRate / 200), Math.ceil(frames / 2));
+  const scheduled = await faded(frames, sampleRate, fade);
+  const defaults = await faded(frames, sampleRate, undefined);
+  const defaultFade = Math.min(Math.round(sampleRate * .005), Math.floor(frames / 2));
+  for (let i = 0; i < frames; i++) {
+   const gain = n => n ? Math.min(1, i / n, (frames - 1 - i) / n) : 1;
+   assert(Math.abs(scheduled[i] - baseline[i] * gain(fade)) < 2e-7);
+   assert(Math.abs(defaults[i] - baseline[i] * gain(defaultFade)) < 2e-7);
+  }
+ }
+ for (const edgeFadeFrames of [-1, .5, NaN, Infinity, 2049]) await assert.rejects(call('create', {channels: 1, sampleRate: 44100, sourceFrames: 4095, speed: 1, pitch: 0, edgeFadeFrames}));
  const started = performance.now();
  let maxRMSDifference = 0;
  for (let iteration = 0; iteration < 20; iteration++) {
@@ -91,5 +118,5 @@ try {
    }
   }
  }
- console.log(JSON.stringify({ iterations: 20, casesPerIteration: 5, fixedHeapBytes: initial.heapBytes, sourceBlockFrames: 512, maxOutputBlockFrames: 8192, elapsedMs: performance.now() - started, nativeSignalParity: true, maxRMSDifference, rmsTolerance: .02 }, null, 2));
+ console.log(JSON.stringify({ iterations: 20, casesPerIteration: 5, fixedHeapBytes: initial.heapBytes, sourceBlockFrames: 512, maxOutputBlockFrames: 8192, elapsedMs: performance.now() - started, nativeSignalParity: true, scheduledFadeGainCases: 16, defaultFadeUnchanged: true, maxRMSDifference, rmsTolerance: .02 }, null, 2));
 } finally { clearTimeout(timeout); await worker.terminate(); }

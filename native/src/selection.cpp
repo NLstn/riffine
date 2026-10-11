@@ -46,6 +46,14 @@ int riffine_selection_create(uint32_t channels,uint32_t rate,uint64_t frames,dou
   *selection=s.release();
  });
 }
+int riffine_selection_set_edge_fade_frames(riffine_selection *s,uint64_t frames,char *error,size_t size) {
+ return boundary(error,size,[&] {
+  require(s && !s->failed,"selection must be usable");
+  require(s->remaining==s->sourceFrames && s->emitted==0 && !s->flushed,"edge fade requires an unprocessed selection");
+  require(frames<=(s->expected+1)/2,"edge fade exceeds selection bound");
+  s->fade=frames;
+ });
+}
 int riffine_selection_info_get(const riffine_selection *s,riffine_selection_info *info,char *error,size_t size) {
  return boundary(error,size,[&] {require(s && info,"selection and info are required");*info={s->channels,s->rate,s->expected,s->sourceFrames-s->remaining};});
 }

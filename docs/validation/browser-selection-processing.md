@@ -68,3 +68,6 @@ No AudioWorklet output or presentation clock is connected by this slice. The
 practice workspace still disables live playback; `liveTransport` stays false.
 Node worker evidence does not attest an actual browser device, physical listening,
 mobile recovery or musical quality. Those remain required follow-on work.
+
+Exact transport edge fades are available through the additive worker setting;
+see [scheduled selection fades](scheduled-selection-fades.md).
