@@ -18,7 +18,12 @@ export interface PracticeFacade {
  cancel(): void;
  dispose(): void;
 }
-interface OutputQueueFactory { createOutputQueue(channels: number): SharedArrayBuffer }
+interface PresentationMonitorPort { failure?: Error; finish(expectedFrames: number): Promise<void>; close(): void }
+interface OutputQueueFactory {
+ createOutputQueue(channels: number): SharedArrayBuffer;
+ createPresentationTimeline?(): SharedArrayBuffer;
+ PresentationMonitor?: new (context: AudioContext, timeline: SharedArrayBuffer, onError: (error: Error) => void) => PresentationMonitorPort;
+}
 export class BrowserPractice implements PracticeFacade {
  private worker = new Worker('/practice/worker.js');
  private next = 0;
@@ -35,7 +40,12 @@ export class BrowserPractice implements PracticeFacade {
  constructor(options: { loadOutput?: () => Promise<OutputQueueFactory> } = {}) {
   this.loadOutput = options.loadOutput ?? (async () => {
    const url = new URL('/practice/output-queue.mjs', location.origin).href;
-   return await import(/* @vite-ignore */ url) as OutputQueueFactory;
+   const [queue, timeline, monitor] = await Promise.all([
+    import(/* @vite-ignore */ url),
+    import(/* @vite-ignore */ new URL('/practice/presentation-timeline.mjs', location.origin).href),
+    import(/* @vite-ignore */ new URL('/practice/presentation-monitor.mjs', location.origin).href),
+   ]);
+   return { ...queue, ...timeline, ...monitor } as OutputQueueFactory;
   });
   this.ready = new Promise((resolve, reject) => {
    this.readyCancel = reject;
@@ -83,23 +93,33 @@ export class BrowserPractice implements PracticeFacade {
   const resumed = context.resume();
   void resumed.catch(() => {});
   let node: AudioWorkletNode | undefined;
+  let presentation: PresentationMonitorPort | undefined;
   try {
    if (context.sampleRate !== info.sampleRate) throw new Error('This output device cannot preview the original sample rate.');
    const queueModule = await Promise.race([this.loadOutput(), cancelled]);
    const queue = queueModule.createOutputQueue(info.channels);
+   const timeline = typeof context.getOutputTimestamp === 'function' && queueModule.PresentationMonitor ? queueModule.createPresentationTimeline?.() : undefined;
    await Promise.race([context.audioWorklet.addModule('/practice/output-worklet.mjs'), cancelled]);
-   node = new AudioWorkletNode(context, 'riffine-output', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [info.channels], processorOptions: { queue } });
+   node = new AudioWorkletNode(context, 'riffine-output', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [info.channels], processorOptions: { queue, timeline } });
    node.onprocessorerror = () => this.cancel();
    node.connect(context.destination);
    await Promise.race([resumed, cancelled]);
    if (this.disposed) throw new Error('Practice workspace has closed.');
+   if (timeline && queueModule.PresentationMonitor) presentation = new queueModule.PresentationMonitor(context, timeline, error => { abortPreview(error); this.cancel(); });
    const result = await this.request({ type: 'preview' }, undefined, '', queue);
-   // This is a conservative preview drain, not presentation acknowledgement.
-   // The completed report counts callback copies and never increments loops.
-   if (!result.error) await Promise.race([new Promise(resolve => setTimeout(resolve, Math.ceil((context.baseLatency + (context.outputLatency || 0)) * 1000 + 20))), cancelled]);
+   // Always await the core reply above, even after a timestamp failure, so its
+   // borrowed-reader/callback teardown fence completes before closing the host.
+   if (presentation?.failure) throw presentation.failure;
+   if (!result.error) {
+    if (presentation && result.preview) await Promise.race([presentation.finish(result.preview.outputFrames), cancelled]);
+    else await Promise.race([new Promise(resolve => setTimeout(resolve, Math.ceil((context.baseLatency + (context.outputLatency || 0)) * 1000 + 20))), cancelled]);
+   }
+   // Reports remain callback-copy diagnostics; no transport/loop acknowledgements
+   // are emitted by preview, including browsers with output timestamps.
    return result;
   } finally {
    if (this.previewAbort === abortPreview) this.previewAbort = undefined;
+   presentation?.close();
    node?.disconnect();
    await this.closeAudio(context);
    if (this.audio === context) this.audio = undefined;

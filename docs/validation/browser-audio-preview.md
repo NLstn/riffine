@@ -58,8 +58,12 @@ counter snapshot is retried on the worker, never spun on the audio callback.
 Cancellation closes the shared queue and awaits processing completion before
 releasing Go callbacks/cursor. Workspace close/fatal worker errors cancel setup,
 reject pending requests and close the AudioContext exactly once. The UI disables
-edits while a preview runs. It adds a conservative host buffer-drain delay after
-callback copying; this is not a presentation-clock acknowledgement.
+edits while a preview runs. Where `getOutputTimestamp` is available, a bounded shared timeline maps each
+copied block's AudioWorklet `currentFrame` to its PCM ordinal. The host samples
+that device timestamp until the final tracked frame has passed it, then closes
+the context. Browsers without timestamps retain a conservative host buffer-drain
+delay after callback copying. Neither path emits core transport acknowledgements.
+See [browser presentation mapping](browser-presentation-mapping.md).
 
 ## Evidence
 
@@ -93,12 +97,12 @@ quality claim is made.
 ## Remaining work
 
 Browser preview currently accepts integer WAV PCM. Live repeated transport,
-presentation-clock mapping, seek/pause/recovery and ladder/routine playback are
-still unavailable; `liveTransport` stays false. Copied frames are source-rate
+seek/pause/recovery and ladder/routine playback are still unavailable; `liveTransport` stays false. Copied frames are source-rate
 AudioWorklet submission diagnostics, not device presentation or completed loops.
 The [Web Audio specification](https://www.w3.org/TR/webaudio-1.0/#dom-audiocontext-getoutputtimestamp)
 separates context/device timestamps; a production live adapter must implement and
-validate that mapping instead of forwarding callback copies.
+validate the complete device lifecycle and schedule mapping instead of forwarding
+callback copies.
 
 FLAC/MP3 browser decoding, actual physical listening/latency, long browser audio
 sessions, mobile output/lifecycle and production hosting/packaging remain pending.
