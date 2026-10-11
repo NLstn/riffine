@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -29,7 +30,35 @@ func (c PeakCache) Get(ctx context.Context, key string, maxBytes int) ([]byte, e
 	if err != nil {
 		return nil, err
 	}
-	return (Host{}).Read(ctx, path, maxBytes)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if maxBytes < 1 || maxBytes > waveform.MaxCacheBytes {
+		return nil, errors.New("invalid waveform cache read limit")
+	}
+	file, err := openPeakCache(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	stat, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !stat.Mode().IsRegular() || stat.Size() > int64(maxBytes) {
+		return nil, errors.New("invalid or oversized waveform cache")
+	}
+	data, err := io.ReadAll(io.LimitReader(peakCacheReader{ctx: ctx, source: file}, int64(maxBytes)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxBytes {
+		return nil, errors.New("waveform cache changed beyond its read limit")
+	}
+	if err = ctx.Err(); err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 func (c PeakCache) Put(ctx context.Context, key string, data []byte) error {
 	if err := ctx.Err(); err != nil {
@@ -69,3 +98,18 @@ func (c PeakCache) Put(ctx context.Context, key string, data []byte) error {
 }
 
 var _ waveform.Cache = PeakCache{}
+
+type peakCacheReader struct {
+	ctx    context.Context
+	source io.Reader
+}
+
+func (r peakCacheReader) Read(data []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	if len(data) > 64<<10 {
+		data = data[:64<<10]
+	}
+	return r.source.Read(data)
+}
