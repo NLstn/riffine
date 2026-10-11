@@ -52,6 +52,7 @@ type Step struct {
 	Error    practice.ErrorCode `json:"error,omitempty"`
 }
 type Report struct {
+	WaveformDetail       waveform.Window             `json:"waveformDetail"`
 	Waveform             waveform.Window             `json:"waveform"`
 	PCMAndLibrary        bool                        `json:"pcmAndLibrary"`
 	Ladder               LadderReport                `json:"ladder"`
@@ -137,6 +138,22 @@ func execute(input string) (r Report, err error) {
 	}
 	if len(r.Waveform.Cells) > 7 || r.Waveform.RequestedStart != f.Render.StartFrame || r.Waveform.RequestedEnd != f.Render.EndFrame {
 		return r, errors.New("waveform window contract differs")
+	}
+
+	detail, detailErr := session.OpenWaveformDetail(ctx)
+	if detailErr != nil {
+		return r, detailErr
+	}
+	r.WaveformDetail, detailErr = detail.Query(ctx, 255, 258, 3)
+	closeErr := detail.Close()
+	if detailErr != nil {
+		return r, detailErr
+	}
+	if closeErr != nil {
+		return r, closeErr
+	}
+	if len(r.WaveformDetail.Cells) != 3 || r.WaveformDetail.FramesPerCell != 1 || r.WaveformDetail.Cells[0].StartFrame != 255 || r.WaveformDetail.Cells[2].EndFrame != 258 {
+		return r, errors.New("waveform detail source coordinates differ")
 	}
 	for _, step := range f.Steps {
 		snapshot, e := session.Dispatch(ctx, step.Command)

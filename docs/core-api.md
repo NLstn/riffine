@@ -199,3 +199,16 @@ notes, named loops and bookmarks. Snapshots own all annotation slices; clients
 cannot mutate a session by editing a previous snapshot. CLI `annotate` saves the
 result exclusively to a new file. See [portable session validation](validation/portable-sessions.md)
 for schema limits, migration fixtures, examples and outstanding revision/recovery work.
+
+### Precise waveform detail
+
+`Session.OpenWaveformDetail(ctx)` returns an owned analysis handle. Keep it across
+viewport requests and call `Close` before relinking or releasing resource access.
+`Query(ctx,startFrame,endFrame,maxBins)` returns exact extrema inside the requested
+source-frame range, with at most 4,096 cells and 1,048,576 decoded viewport frames.
+One-frame cells have equal min/max. Queries retain the reader and decoder, never
+refingerprint or edit the session, and do not depend on speed or pitch. Wider
+views use the cached pyramid. Cancellation/failure after decoding starts requires
+closing/reopening the handle; rejected requests do not touch the decoder. MP3
+seeking currently replays the source prefix with fixed memory; CPU grows with
+position. [Validation and ownership](validation/waveform-detail.md).
