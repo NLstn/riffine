@@ -17,6 +17,13 @@ try {
    const block = i % 2 ? half : full;
    writer.write(block);
    if (!processor.process(input, output)) throw new Error('Unexpected worklet stop.');
+   if (i % 11 === 0) {
+    const before = writer.snapshot();
+    const original = output[0][0].slice();
+    if (!processor.process(input, output)) throw new Error('Repeated worklet pull stopped.');
+    const after = writer.snapshot();
+    if (before.copiedFrames !== after.copiedFrames || before.underrunFrames !== after.underrunFrames || original.some((sample,index) => sample !== output[0][0][index])) throw new Error('Repeated worklet pull changed PCM or counters.');
+   }
    copiedFrames += block.length; contextFrame += 128;
    if (i % 7 === 0) {
     globalThis.currentFrame = contextFrame;

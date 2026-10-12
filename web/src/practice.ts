@@ -144,7 +144,7 @@ export class BrowserPractice implements PracticeFacade {
     await Promise.race([Promise.all([resumed,beforeInstall]),cancelled]);
     if (this.disposed) throw new Error('Practice workspace closed.');
     this.audio = context;
-    this.liveHost = new module.LiveOutputHost(context,snapshot.project.track.audio.channels,() => {});
+    this.liveHost = new module.LiveOutputHost(context,snapshot.project.track.audio.channels,error => console.warn('[riffine] Live output stopped:',error.message));
    } catch (error) { await this.closeAudio(context); if (this.audio === context) this.audio = undefined; if (this.liveHost?.context === context) this.liveHost = undefined; throw error; }
   })();
   this.liveSetup = ready; void ready.catch(() => {});
