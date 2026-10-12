@@ -33,14 +33,17 @@ and composition, disabled bindings, conflicting mappings without writes, malform
 stored preferences without overwrite, and storage failure. CI runs this alongside
 the actual facade ownership tests and the production web build.
 
-A browser check opened Keyboard shortcuts with native Space and typed R/Space
-into Project notes, preserving ordinary text entry and leaving playback unattached.
-Native Space on Play initiated the actual transport. Full remapping/repeat/reopen
-and uninterrupted keyboard playback checks remain pending: automatic approval
-review blocked further browser access after a usage-limit failure. There is also
-an intermittent browser-host startup interruption under investigation in the
-[playback binding slice](browser-live-binding.md). No complete keyboard-only or
-screen-reader workflow is claimed by this partial evidence.
+The actual browser check opened settings with native Space, typed S/R/Space into
+notes while playback continued, rejected a conflicting P/P mapping without
+stopping playback, saved P for Play/Pause, and paused with P after 690 loops.
+Disabling shortcuts left the paused position/count unchanged. An 800 ms held R
+restarted playback; S stopped it at the saved A/B start with zero runtime loops.
+Closing/reopening the workspace retained the P/R/S preferences. Defaults were
+restored after this generated-fixture check. Visible source/parameter/time labels
+now use a dark foreground on the light practice panel; the prior inherited light
+text was unreadable. No independent screen-reader or physical-pedal evidence is
+claimed by these browser and accessibility-tree checks.
+
 
 ## Hands-free and remaining gates
 
