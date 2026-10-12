@@ -20,15 +20,19 @@ int run(int argc, char **argv) {
     if(argc==2 && std::string(argv[1])=="version") {std::puts("riffine-audio ABI 1; Signalsmith Stretch + miniaudio");return 0;}
     int result=1;
     auto operation = argc > 1 ? std::string(argv[1]) : std::string();
-    if(argc==2 && operation=="formats") { std::puts(R"({"abi":1,"formats":["wav-pcm","flac","mp3"]})"); return 0; }
-    if((argc==3 && operation=="decoder-info") || (argc==4 && operation=="decoder-read")) {
+    if(argc==2 && operation=="formats") { std::puts(R"({"abi":1,"formats":["wav-pcm","flac","mp3"],"borrowedSources":true})"); return 0; }
+    if((argc==3 && (operation=="decoder-info" || operation=="decoder-info-handle")) || (argc==4 && (operation=="decoder-read" || operation=="decoder-read-handle"))) {
       riffine_decoder *raw=nullptr;
-      if(riffine_decoder_open_file(argv[2],&raw,error,sizeof(error))) throw std::runtime_error(error);
+      if(operation=="decoder-info-handle" || operation=="decoder-read-handle"){
+        std::string value=argv[2];
+        if(value.empty()||value.find_first_not_of("0123456789")!=std::string::npos)throw std::runtime_error("invalid source handle");
+        if(riffine_decoder_open_handle(std::stoull(value),&raw,error,sizeof(error)))throw std::runtime_error(error);
+      } else if(riffine_decoder_open_file(argv[2],&raw,error,sizeof(error))) throw std::runtime_error(error);
       struct Owner {riffine_decoder *value;~Owner(){riffine_decoder_close(value);}} owner{raw};
       riffine_decoder_info info{};
       if(riffine_decoder_info_get(raw,&info,error,sizeof(error))) throw std::runtime_error(error);
       const char *encoding=info.encoding==1 ? "wav-pcm" : info.encoding==2 ? "flac" : "mp3";
-      if(operation=="decoder-info") {
+      if(operation=="decoder-info" || operation=="decoder-info-handle") {
         std::printf(R"({"encoding":"%s","sampleRate":%u,"channels":%u,"bits":%u,"frames":%llu})" "\n",encoding,info.sample_rate,info.channels,info.source_bits,(unsigned long long)info.frames);return 0;
       }
       auto start=std::stoull(argv[3]);

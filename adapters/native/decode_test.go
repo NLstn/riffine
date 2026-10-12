@@ -129,3 +129,93 @@ func TestNativeCompressedDecoder(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeCompressedDecoderKeepsBorrowedSourceAfterPathReplacement(t *testing.T) {
+	helper := os.Getenv("RIFFINE_AUDIO_HELPER")
+	if helper == "" {
+		t.Skip("set RIFFINE_AUDIO_HELPER for native integration tests")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	decoder, err := NewDecoder(ctx, Adapter{Executable: helper})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, codec := range []string{"flac", "mp3"} {
+		t.Run(codec, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join("../../native/testdata", "generated-stereo."+codec))
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := t.TempDir()
+			path := filepath.Join(dir, "原本."+codec)
+			if err = os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			r, err := (filesystem.Host{}).Open(ctx, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Close()
+			info, err := decoder.Inspect(ctx, r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			file, ok := filesystem.BorrowedFile(r)
+			if !ok {
+				t.Fatal("filesystem reader did not lend its original file")
+			}
+			if _, err = file.Seek(123, io.SeekStart); err != nil {
+				t.Fatal(err)
+			}
+			baseline, err := decoder.OpenPCM(ctx, r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = baseline.SeekFrame(ctx, 12345); err != nil {
+				t.Fatal(err)
+			}
+			expected := make([]float32, 2048)
+			if n, err := baseline.ReadFrames(ctx, expected); err != nil || n != 1024 {
+				t.Fatal(n, err)
+			}
+			if err = baseline.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if position, err := file.Seek(0, io.SeekCurrent); err != nil || position != 123 {
+				t.Fatal("native decoder changed original file position", position, err)
+			}
+			if err = os.Rename(path, filepath.Join(dir, "moved."+codec)); err != nil {
+				t.Fatal(err)
+			}
+			if err = os.WriteFile(path, []byte("replacement is not the original audio"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			current, err := decoder.Inspect(ctx, r)
+			if err != nil || !reflect.DeepEqual(current, info) {
+				t.Fatal("metadata/hash followed replacement path", current, err)
+			}
+			stream, err := decoder.OpenPCM(ctx, r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = stream.SeekFrame(ctx, 12345); err != nil {
+				t.Fatal(err)
+			}
+			actual := make([]float32, 2048)
+			if n, err := stream.ReadFrames(ctx, actual); err != nil || n != 1024 || !reflect.DeepEqual(actual, expected) {
+				t.Fatal("PCM followed replacement path", n, err)
+			}
+			if err = stream.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if position, err := file.Seek(0, io.SeekCurrent); err != nil || position != 123 {
+				t.Fatal("inherited reader changed original cursor", position, err)
+			}
+			prefix := make([]byte, 4)
+			if _, err = r.ReadAt(prefix, 0); err != nil || !reflect.DeepEqual(prefix, data[:4]) {
+				t.Fatal("helper closed or replaced original resource", prefix, err)
+			}
+		})
+	}
+}

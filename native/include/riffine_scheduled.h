@@ -27,6 +27,9 @@ typedef struct riffine_scheduled_block {
  uint32_t frames,generated_complete;
 } riffine_scheduled_block;
 int riffine_scheduled_open(const char *path,riffine_scheduled_worker **worker,char *error,size_t size);
+/* Same worker using the already verified borrowed OS source, without opening
+ * its path again. Each decoder retains its own duplicate/offset cursor. */
+int riffine_scheduled_open_handle(uint64_t handle,riffine_scheduled_worker **worker,char *error,size_t size);
 int riffine_scheduled_info_get(const riffine_scheduled_worker *,riffine_scheduled_info *,char *,size_t);
 int riffine_scheduled_reset(riffine_scheduled_worker *,uint64_t generation,char *,size_t);
 int riffine_scheduled_submit(riffine_scheduled_worker *,const riffine_schedule *,char *,size_t);

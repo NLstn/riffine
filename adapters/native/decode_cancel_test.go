@@ -18,14 +18,18 @@ func TestMain(m *testing.M) {
 	if os.Getenv("RIFFINE_DECODER_TEST_PROCESS") == "1" {
 		switch os.Args[1] {
 		case "formats":
-			fmt.Print(`{"abi":1,"formats":["wav-pcm","flac","mp3"]}`)
-		case "decoder-info":
+			if os.Getenv("RIFFINE_DECODER_TEST_LEGACY_SOURCE") == "1" {
+				fmt.Print(`{"abi":1,"formats":["wav-pcm","flac","mp3"]}`)
+			} else {
+				fmt.Print(`{"abi":1,"formats":["wav-pcm","flac","mp3"],"borrowedSources":true}`)
+			}
+		case "decoder-info-handle":
 			frames := 48000
 			if os.Getenv("RIFFINE_DECODER_TEST_FINAL_WAIT") == "1" {
 				frames = 1024
 			}
 			fmt.Printf(`{"encoding":"mp3","sampleRate":48000,"channels":1,"bits":0,"frames":%d}`, frames)
-		case "decoder-read":
+		case "decoder-read-handle":
 			if os.Getenv("RIFFINE_DECODER_TEST_FINAL_WAIT") == "1" {
 				if _, err := os.Stdout.Write(make([]byte, 1024*4)); err != nil {
 					os.Exit(1)
@@ -107,5 +111,13 @@ func testStalledWorkerCancellation(t *testing.T, finalWait bool) {
 	// The original borrowed file is still available after decoder teardown.
 	if _, err = r.ReadAt(make([]byte, 4), 0); err != nil {
 		t.Fatal("decoder closed original reader", err)
+	}
+}
+
+func TestDecoderRejectsHelperWithoutBorrowedSourceCapability(t *testing.T) {
+	t.Setenv("RIFFINE_DECODER_TEST_PROCESS", "1")
+	t.Setenv("RIFFINE_DECODER_TEST_LEGACY_SOURCE", "1")
+	if _, err := NewDecoder(context.Background(), Adapter{Executable: os.Args[0]}); err == nil {
+		t.Fatal("advertised compressed decoding with an incompatible helper")
 	}
 }

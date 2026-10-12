@@ -32,14 +32,15 @@ func NewDecoder(ctx context.Context, adapter Adapter) (Decoder, error) {
 		return result, err
 	}
 	var report struct {
-		ABI     int      `json:"abi"`
-		Formats []string `json:"formats"`
+		ABI             int      `json:"abi"`
+		Formats         []string `json:"formats"`
+		BorrowedSources bool     `json:"borrowedSources"`
 	}
 	if err = json.Unmarshal(data, &report); err != nil {
 		return result, err
 	}
-	if report.ABI != 1 || len(report.Formats) != 3 || report.Formats[0] != "wav-pcm" || report.Formats[1] != "flac" || report.Formats[2] != "mp3" {
-		return result, errors.New("native decoder protocol/capabilities are unsupported")
+	if report.ABI != 1 || !report.BorrowedSources || len(report.Formats) != 3 || report.Formats[0] != "wav-pcm" || report.Formats[1] != "flac" || report.Formats[2] != "mp3" {
+		return result, errors.New("native decoder protocol/capabilities are unsupported; rebuild the helper with borrowed-source support")
 	}
 	return Decoder{adapter: adapter, formats: append([]string(nil), report.Formats...)}, nil
 }
@@ -86,11 +87,7 @@ func (d Decoder) Inspect(ctx context.Context, r resource.Reader) (audio.Info, er
 	if n == 12 && string(header[:4]) == "RIFF" && string(header[8:]) == "WAVE" {
 		return audio.Info{}, err
 	}
-	path, ok := filesystem.LocalPath(r)
-	if !ok {
-		return audio.Info{}, errors.New("native compressed decoding requires a filesystem-owned resource")
-	}
-	data, err := d.adapter.capture(ctx, "decoder-info", path)
+	data, err := d.adapter.captureSource(ctx, r, "decoder-info-handle")
 	if err != nil {
 		return audio.Info{}, err
 	}
@@ -123,11 +120,10 @@ func (d Decoder) OpenPCM(ctx context.Context, r resource.Reader) (audio.PCMStrea
 	if info.Encoding == "wav-pcm" {
 		return (audio.WAVDecoder{}).OpenPCM(ctx, r)
 	}
-	path, ok := filesystem.LocalPath(r)
-	if !ok {
+	if _, ok := filesystem.BorrowedFile(r); !ok {
 		return nil, errors.New("native compressed decoder requires a local resource")
 	}
-	return &decodedPCM{adapter: d.adapter, parent: ctx, path: path, info: info, raw: make([]byte, audio.PCMBlockFrames*info.Channels*4)}, nil
+	return &decodedPCM{adapter: d.adapter, parent: ctx, source: r, info: info, raw: make([]byte, audio.PCMBlockFrames*info.Channels*4)}, nil
 }
 func (d Decoder) Peaks(ctx context.Context, r resource.Reader, bins int) (audio.Waveform, error) {
 	if bins < 1 || bins > 100000 {
@@ -152,7 +148,7 @@ type decodedPCM struct {
 	mu             sync.Mutex
 	adapter        Adapter
 	parent         context.Context
-	path           string
+	source         resource.Reader
 	info           audio.Info
 	frame          int64
 	raw            []byte
@@ -166,7 +162,11 @@ func (s *decodedPCM) start() error {
 	if s.cmd != nil {
 		return nil
 	}
-	cmd := exec.CommandContext(s.parent, s.adapter.Executable, "decoder-read", s.path, strconv.FormatInt(s.frame, 10))
+	cmd, release, err := s.adapter.sourceCommand(s.parent, s.source, "decoder-read-handle", strconv.FormatInt(s.frame, 10))
+	if err != nil {
+		return err
+	}
+	defer release()
 	s.stderr = cappedOutput{limit: 4096}
 	cmd.Stderr = &s.stderr
 	pipe, err := cmd.StdoutPipe()

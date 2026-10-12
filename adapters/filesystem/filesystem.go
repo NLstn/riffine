@@ -28,7 +28,7 @@ func (Host) Open(ctx context.Context, handle string) (resource.Reader, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	f, err := os.Open(handle)
+	f, err := openResourceFile(handle)
 	if err != nil {
 		return nil, err
 	}
@@ -160,4 +160,15 @@ func LocalPath(r resource.Reader) (string, bool) {
 		return "", false
 	}
 	return local.File.Name(), true
+}
+
+// BorrowedFile lends a regular resource's original read-only File to host process
+// adapters. The caller must retain it until inherited helper teardown finishes;
+// adapters must not close it or change its file position. Core uses ReaderAt.
+func BorrowedFile(r resource.Reader) (*os.File, bool) {
+	local, ok := r.(reader)
+	if !ok {
+		return nil, false
+	}
+	return local.File, true
 }

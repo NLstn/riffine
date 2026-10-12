@@ -76,3 +76,12 @@ before merging. #17 stays open: browser/mobile compressed resource adapters,
 platform tag parsing, client capability parity and large-library client integration
 remain outstanding. MP3 seek responsiveness and physical playback remain measured
 production gates rather than implied by a one-second fixture.
+
+## Retained source identity
+
+Compressed metadata/PCM now use inherited read-only original handles, preserving
+identity across pathname replacement and leaving the caller's cursor/reader
+untouched. The helper advertises borrowedSources and older helpers require a
+rebuild. See [native-borrowed-source](native-borrowed-source.md) for the resource,
+cancellation and platform checks. Direct-path preview/render ownership remains
+separate work.
