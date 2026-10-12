@@ -95,9 +95,25 @@ jobs:
         with:
           name: riffine-cli-${{ runner.os }}-${{ runner.arch }}
           path: build/package/
+  native_safety:
+    name: native-safety
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build scheduled worker with memory/undefined-behavior checks
+        run: |
+          cmake -S native -B build/native-safety -DCMAKE_BUILD_TYPE=Debug \
+            '-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
+            '-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
+            '-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined'
+          cmake --build build/native-safety --target riffine-scheduled-test riffine-stream-abi-test --parallel 2
+      - run: ctest --test-dir build/native-safety -R 'bounded-scheduled-worker|streaming-c-abi' --output-on-failure --no-tests=error
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
   required:
     if: always()
-    needs: [core, native, web]
+    needs: [core, native, web, native_safety]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if a CI job did not succeed
@@ -105,7 +121,9 @@ jobs:
           CORE_RESULT: ${{ needs.core.result }}
           NATIVE_RESULT: ${{ needs.native.result }}
           WEB_RESULT: ${{ needs.web.result }}
+          NATIVE_SAFETY_RESULT: ${{ needs.native_safety.result }}
         run: |
           test "$CORE_RESULT" = success
           test "$NATIVE_RESULT" = success
           test "$WEB_RESULT" = success
+          test "$NATIVE_SAFETY_RESULT" = success

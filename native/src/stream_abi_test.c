@@ -1,5 +1,6 @@
 /* Compile and execute as C: opaque API must not require C++ headers/types. */
 #include "riffine_stream.h"
+#include "riffine_scheduled.h"
 #include "riffine_preview.h"
 #include "riffine_selection.h"
 int main(void) {
@@ -10,6 +11,15 @@ int main(void) {
   if(riffine_stream_create(&config,&stream,error,sizeof(error))) return 1;
   int result=riffine_stream_get_limits(stream,&limits,error,sizeof(error));
   riffine_stream_destroy(stream);
+  riffine_scheduled_worker *worker=0;
+  riffine_scheduled_info scheduled_info;
+  riffine_scheduled_block scheduled_block;
+  if(riffine_scheduled_open(0,&worker,error,sizeof(error))!=1 || worker) return 1;
+  if(riffine_scheduled_info_get(0,&scheduled_info,error,sizeof(error))!=1) return 1;
+  if(riffine_scheduled_reset(0,1,error,sizeof(error))!=1) return 1;
+  if(riffine_scheduled_submit(0,0,error,sizeof(error))!=1) return 1;
+  if(riffine_scheduled_read(0,0,1,&scheduled_block,error,sizeof(error))!=1 || scheduled_block.frames) return 1;
+  riffine_scheduled_close(0);
   riffine_preview_source *source=0;
   if(riffine_preview_open(0,0,1,1,0,&source,error,sizeof(error))!=1 || source) return 1;
   riffine_selection *selection=0;
