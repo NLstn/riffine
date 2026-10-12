@@ -158,6 +158,11 @@ See [precise waveform detail](docs/validation/waveform-detail.md).
 
 ### Browser practice workspace
 
+Practice keyboard controls use Space for Play/Pause, R for Restart and S for
+Stop while focus is in the workspace. **Keyboard shortcuts** lets you remap or
+disable them and save preferences locally; typing and native button activation
+retain their usual keys. See [foreground keyboard validation](docs/validation/browser-keyboard-controls.md).
+
 The browser practice workspace also supports live Play/Pause, Stop, Restart and
 Seek for supported WAV sources. Position and completed A/B loops follow the
 shared core's device acknowledgements. Use **Close playback** to return to a
