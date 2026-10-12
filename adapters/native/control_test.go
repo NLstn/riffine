@@ -1,0 +1,399 @@
+package native
+
+import (
+	"context"
+	"encoding/binary"
+	"errors"
+	"github.com/NLstn/riffine/adapters/filesystem"
+	"github.com/NLstn/riffine/core/audio"
+	"github.com/NLstn/riffine/core/engine"
+	"github.com/NLstn/riffine/core/resource"
+	"io"
+	"math"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+func controlFixture(t *testing.T) (resource.Reader, audio.Info) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "source.wav")
+	if err := filesystem.WriteTone(path, 1, 440, 48000, 1); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := (filesystem.Host{}).Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { reader.Close() })
+	info, err := (audio.WAVDecoder{}).Inspect(context.Background(), reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return reader, info
+}
+func serveControlFixture() {
+	mode := os.Getenv("RIFFINE_CONTROL_TEST_MODE")
+	generation := uint64(0)
+	for call := 1; ; call++ {
+		var request [128]byte
+		if _, err := io.ReadFull(os.Stdin, request[:]); err != nil {
+			return
+		}
+		if mode == "stall_open" || (mode == "stall_info" && call == 2) {
+			if err := os.WriteFile(os.Getenv("RIFFINE_DECODER_TEST_SIGNAL"), []byte("started"), 0600); err != nil {
+				os.Exit(1)
+			}
+			time.Sleep(time.Hour)
+		}
+		if binary.LittleEndian.Uint64(request[24:]) == 2 {
+			generation = binary.LittleEndian.Uint64(request[32:])
+		}
+		words := [16]uint64{controlMagic, 1, binary.LittleEndian.Uint64(request[16:]), 0, 1, 48000, 48000, generation}
+		if mode == "bad_id" {
+			words[2]++
+		}
+		if mode == "bad_dimensions" {
+			words[6]++
+		}
+		if mode == "bad_reserved" {
+			words[15] = 1
+		}
+		if mode == "bad_status" {
+			words[3] = 2
+		}
+		var response [640]byte
+		for i, word := range words {
+			binary.LittleEndian.PutUint64(response[i*8:], word)
+		}
+		if mode == "bad_error" {
+			response[128] = 255
+		}
+		if mode == "short" {
+			os.Stdout.Write(response[:127])
+			return
+		}
+		if _, err := os.Stdout.Write(response[:]); err != nil {
+			return
+		}
+	}
+}
+
+func TestNativeScheduledWorker(t *testing.T) {
+	helper := os.Getenv("RIFFINE_AUDIO_HELPER")
+	if helper == "" {
+		t.Skip("set RIFFINE_AUDIO_HELPER for mandatory native CI integration")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	a := Adapter{Executable: helper}
+	decoder, err := NewDecoder(ctx, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, codec := range []string{"wav", "flac", "mp3"} {
+		t.Run(codec, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "音-guitär."+codec)
+			if codec == "wav" {
+				if err := filesystem.WriteTone(path, 1, 440, 48000, 2); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				data, err := os.ReadFile(filepath.Join("../../native/testdata", "generated-stereo."+codec))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = os.WriteFile(path, data, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			reader, err := (filesystem.Host{}).Open(ctx, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reader.Close()
+			info, err := decoder.Inspect(ctx, reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = os.Rename(path, path+".original"); err != nil {
+				t.Fatal(err)
+			}
+			if err = os.WriteFile(path, []byte("replacement"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			file, ok := filesystem.BorrowedFile(reader)
+			if !ok {
+				t.Fatal("missing original")
+			}
+			if _, err = file.Seek(123, io.SeekStart); err != nil {
+				t.Fatal(err)
+			}
+			opening, finish := context.WithCancel(ctx)
+			worker, err := a.OpenScheduledWorker(opening, reader, info)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer worker.Close()
+			finish() // opening context must not become the lifetime context
+			pid := worker.cmd.Process.Pid
+			generation := uint64(1<<53) + 17
+			sequence := uint64(1<<53) + 19
+			for run := 0; run < 100; run++ {
+				generation++
+				sequence++
+				if err = worker.Reset(ctx, generation); err != nil {
+					t.Fatal(err)
+				}
+				s := engine.Schedule{Generation: generation, Sequence: sequence, StartFrame: 1151, EndFrame: 10001, OutputStart: 0, OutputEnd: 8850, EdgeFadeFrames: 240, Speed: 1, Pitch: 3}
+				if err = worker.Submit(ctx, s); err != nil {
+					t.Fatal(err)
+				}
+				sequence++
+				s.Sequence = sequence
+				s.OutputStart = 8850
+				s.OutputEnd = 17700
+				if err = worker.Submit(ctx, s); err != nil {
+					t.Fatal(err)
+				}
+				state, err := worker.Info(ctx)
+				if err != nil || state.Generation != generation || state.LastSequence != sequence || state.Pending != 2 || state.Frames != info.Frames {
+					t.Fatal(state, err)
+				}
+				sequence++
+				s.Sequence = sequence
+				s.OutputStart = 17700
+				s.OutputEnd = 26550
+				if err = worker.Submit(ctx, s); err == nil {
+					t.Fatal("accepted third native slot")
+				}
+				if err = worker.Reset(ctx, generation); err == nil {
+					t.Fatal("accepted stale reset")
+				}
+				again, err := worker.Info(ctx)
+				if err != nil || again != state || worker.cmd.Process.Pid != pid {
+					t.Fatal("rejection/restart changed worker", again, err)
+				}
+			}
+			if err = worker.Reset(ctx, math.MaxUint64); err != nil {
+				t.Fatal(err)
+			}
+			final, err := worker.Info(ctx)
+			if err != nil || final.Generation != math.MaxUint64 || final.Pending != 0 {
+				t.Fatal("64-bit identity was rounded", final, err)
+			}
+			worker.mu.Lock()
+			_, err = worker.exchangeLocked(ctx, [16]uint64{3: 99})
+			worker.mu.Unlock()
+			if err == nil {
+				t.Fatal("accepted unknown operation")
+			}
+			if _, err = worker.Info(ctx); err != nil {
+				t.Fatal("operation rejection lost framing", err)
+			}
+			if err = worker.Close(); err != nil {
+				t.Fatal(err)
+			}
+			worker.Close()
+			if worker.cmd.ProcessState == nil || !worker.waited {
+				t.Fatal("Close returned before child exit")
+			}
+			if pos, err := file.Seek(0, io.SeekCurrent); err != nil || pos != 123 {
+				t.Fatal("worker changed caller cursor", pos, err)
+			}
+			if _, err = reader.ReadAt(make([]byte, 4), 0); err != nil {
+				t.Fatal("worker closed caller reader", err)
+			}
+			if _, err = worker.Info(ctx); err == nil {
+				t.Fatal("closed worker remained usable")
+			}
+		})
+	}
+}
+
+func TestControlMalformedHandshakeFencesProcess(t *testing.T) {
+	for _, mode := range []string{"bad_id", "bad_dimensions", "bad_reserved", "bad_status", "bad_error", "short"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("RIFFINE_DECODER_TEST_PROCESS", "1")
+			t.Setenv("RIFFINE_CONTROL_TEST_MODE", mode)
+			reader, info := controlFixture(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			worker, err := (Adapter{Executable: os.Args[0]}).OpenScheduledWorker(ctx, reader, info)
+			if err == nil || worker != nil {
+				if worker != nil {
+					worker.Close()
+				}
+				t.Fatal("accepted malformed handshake", mode)
+			}
+			if _, err = reader.ReadAt(make([]byte, 4), 0); err != nil {
+				t.Fatal("failed handshake closed reader", err)
+			}
+		})
+	}
+}
+func TestControlOpeningCancellationFencesProcess(t *testing.T) {
+	t.Setenv("RIFFINE_DECODER_TEST_PROCESS", "1")
+	t.Setenv("RIFFINE_CONTROL_TEST_MODE", "stall_open")
+	signal := filepath.Join(t.TempDir(), "started")
+	t.Setenv("RIFFINE_DECODER_TEST_SIGNAL", signal)
+	reader, info := controlFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		worker, err := (Adapter{Executable: os.Args[0]}).OpenScheduledWorker(ctx, reader, info)
+		if worker != nil {
+			worker.Close()
+			done <- errors.New("stalled handshake returned a worker")
+			return
+		}
+		done <- err
+	}()
+	for {
+		if _, err := os.Stat(signal); err == nil {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatal("handshake ended before cancellation", err)
+		case <-ctx.Done():
+			t.Fatal("handshake did not stall")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("handshake cancellation did not fence process")
+	}
+	if _, err := reader.ReadAt(make([]byte, 4), 0); err != nil {
+		t.Fatal(err)
+	}
+}
+func TestControlCloseInterruptsPendingCall(t *testing.T)       { testControlStall(t, false) }
+func TestControlRequestCancellationFencesProcess(t *testing.T) { testControlStall(t, true) }
+func testControlStall(t *testing.T, cancelRequest bool) {
+	t.Setenv("RIFFINE_DECODER_TEST_PROCESS", "1")
+	t.Setenv("RIFFINE_CONTROL_TEST_MODE", "stall_info")
+	signal := filepath.Join(t.TempDir(), "started")
+	t.Setenv("RIFFINE_DECODER_TEST_SIGNAL", signal)
+	reader, info := controlFixture(t)
+	lifetime, finish := context.WithTimeout(context.Background(), 5*time.Second)
+	defer finish()
+	worker, err := (Adapter{Executable: os.Args[0]}).OpenScheduledWorker(lifetime, reader, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer worker.Close()
+	ctx, cancel := context.WithCancel(lifetime)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { _, err := worker.Info(ctx); done <- err }()
+	for {
+		if _, err = os.Stat(signal); err == nil {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatal("no stalled request", err)
+		case <-lifetime.Done():
+			t.Fatal("worker never stalled")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	if cancelRequest {
+		cancel()
+	} else {
+		worker.Close()
+	}
+	select {
+	case err := <-done:
+		if err == nil || (cancelRequest && !errors.Is(err, context.Canceled)) {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("stalled control ignored teardown")
+	}
+	if worker.cmd.ProcessState == nil || !worker.waited {
+		t.Fatal("teardown did not wait for process")
+	}
+	if _, err = reader.ReadAt(make([]byte, 4), 0); err != nil {
+		t.Fatal("teardown closed borrowed reader", err)
+	}
+}
+
+func TestNativeControlProtocolClose(t *testing.T) {
+	helper := os.Getenv("RIFFINE_AUDIO_HELPER")
+	if helper == "" {
+		t.Skip("set RIFFINE_AUDIO_HELPER for mandatory native CI integration")
+	}
+	reader, info := controlFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	worker, err := (Adapter{Executable: helper}).OpenScheduledWorker(ctx, reader, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer worker.Close()
+	worker.mu.Lock()
+	_, err = worker.exchangeLocked(ctx, [16]uint64{3: 4})
+	if err == nil {
+		err = worker.cmd.Wait()
+		worker.waited = true
+	}
+	worker.mu.Unlock()
+	if err != nil {
+		t.Fatal("explicit protocol close did not exit cleanly", err)
+	}
+	if _, err = reader.ReadAt(make([]byte, 4), 0); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNativeControlRejectsTruncatedEnvelope(t *testing.T) {
+	helper := os.Getenv("RIFFINE_AUDIO_HELPER")
+	if helper == "" {
+		t.Skip("set RIFFINE_AUDIO_HELPER for mandatory native CI integration")
+	}
+	reader, info := controlFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	worker, err := (Adapter{Executable: helper}).OpenScheduledWorker(ctx, reader, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer worker.Close()
+	worker.mu.Lock()
+	_, err = worker.input.Write([]byte{1})
+	worker.input.Close()
+	if err == nil {
+		err = worker.cmd.Wait()
+		worker.waited = true
+	}
+	worker.mu.Unlock()
+	if err == nil {
+		t.Fatal("native control accepted a truncated envelope")
+	}
+	if _, err = reader.ReadAt(make([]byte, 4), 0); err != nil {
+		t.Fatal("protocol failure closed caller", err)
+	}
+}
+
+func TestControlRejectsOlderHelper(t *testing.T) {
+	t.Setenv("RIFFINE_DECODER_TEST_PROCESS", "1")
+	t.Setenv("RIFFINE_DECODER_TEST_LEGACY_PREVIEW", "1")
+	reader, info := controlFixture(t)
+	worker, err := (Adapter{Executable: os.Args[0]}).OpenScheduledWorker(context.Background(), reader, info)
+	if err == nil || worker != nil {
+		if worker != nil {
+			worker.Close()
+		}
+		t.Fatal("advertised unsupported persistent control")
+	}
+}
