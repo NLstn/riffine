@@ -234,3 +234,8 @@ tbody tr:hover .track-number > span, .track-play-button.is-playing + span { disp
 .practice-error { color: #8b2323; }
 .practice-capability { font-size: 13px; color: #546253; }
 .practice-regions { display: flex; flex-wrap: wrap; list-style: none; gap: 10px; padding: 0; }
+
+.practice-shortcuts { margin: 16px 0; padding: 12px; border: 1px solid #9aa79d; border-radius: 8px; }
+.practice-shortcuts summary { cursor: pointer; }
+.practice-shortcuts p { max-width: 68ch; font-size: 13px; }
+.practice-shortcuts select { padding: 8px; border: 1px solid #9aa79d; border-radius: 6px; background: white; color: #203b2b; }

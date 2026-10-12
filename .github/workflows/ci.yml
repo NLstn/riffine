@@ -57,6 +57,7 @@ jobs:
       - run: node scripts/check-browser-boundary.mjs
       - run: node scripts/check-browser-live-host.mjs
       - run: node --experimental-strip-types scripts/check-practice-facade.mjs
+      - run: node --experimental-strip-types scripts/check-practice-shortcuts.mjs
   native:
     strategy:
       fail-fast: false

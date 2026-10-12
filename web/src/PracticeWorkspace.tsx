@@ -1,10 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { FormEvent, KeyboardEvent } from 'react';
+import { loadShortcuts, saveShortcuts, shortcutKeys, matchShortcut } from './practice-shortcuts';
 import { BrowserPractice, presentationSnapshot } from './practice';
 import type { EditCommand, LiveCommand, PracticeFacade, PracticeResponse, Snapshot, WaveWindow } from './practice';
 
 export default function PracticeWorkspace({ source, onClose, createFacade = () => new BrowserPractice() }: { source?: File; onClose: () => void; createFacade?: () => PracticeFacade }) {
  const facade = useRef<PracticeFacade | null>(null);
+ const operation = useRef(false);
+ const [loadedShortcuts] = useState(loadShortcuts);
+ const [shortcuts, setShortcuts] = useState(loadedShortcuts.settings);
+ const [shortcutDraft, setShortcutDraft] = useState(loadedShortcuts.settings);
+ const [shortcutWarning, setShortcutWarning] = useState(loadedShortcuts.warning ?? '');
  const sourceInput = useRef<HTMLInputElement>(null);
  const projectInput = useRef<HTMLInputElement>(null);
  const [selectedSource, setSelectedSource] = useState(source);
@@ -38,7 +44,7 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
   if (response.window) setWave(response.window);
   return response;
  };
- const run = async (action: () => Promise<void>, message = 'Working locally…') => { setBusy(true); setBusyLabel(message); setError(''); try { await action(); } catch (failure) { const message = String(failure instanceof Error ? failure.message : failure); setError(message); setStatus(message.startsWith('cancelled:') ? 'Operation cancelled.' : 'Operation could not finish.'); } finally { setBusy(false); } };
+ const run = async (action: () => Promise<void>, message = 'Working locally…') => { if (operation.current) return; operation.current = true; setBusy(true); setBusyLabel(message); setError(''); try { await action(); } catch (failure) { const message = String(failure instanceof Error ? failure.message : failure); setError(message); setStatus(message.startsWith('cancelled:') ? 'Operation cancelled.' : 'Operation could not finish.'); } finally { operation.current = false; setBusy(false); } };
  const open = async (original: File, saved?: File) => {
   const client = facade.current;
   if (!client) return;
@@ -85,6 +91,25 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
   install(await facade.current.transport(snapshot, command));
   setStatus(command.type === 'recover' ? 'Playback recovered. Press Play to start.' : 'Playback updated.');
  });
+ const canPlay = !!snapshot && (snapshot.capabilities.liveTransport || (facade.current?.liveSupported && snapshot.capabilities.streamPreview)) && snapshot.transport?.state !== 'error';
+ const togglePlayback = () => transport({type:snapshot?.transport?.state === 'playing' ? 'pause' : 'play'});
+ const keydown = (event: KeyboardEvent<HTMLElement>) => {
+  const action = matchShortcut(event.nativeEvent, shortcuts);
+  if (!action || !snapshot) return;
+  const available = action === 'play_pause' ? canPlay : snapshot.capabilities.liveTransport && snapshot.transport?.state !== 'error';
+  if (!available) return;
+  event.preventDefault();
+  // Consume repeats without delivering a second command; the operation latch
+  // also covers separate quick presses before React has rendered busy state.
+  if (event.repeat || operation.current) return;
+  if (action === 'play_pause') void togglePlayback();
+  else void transport({type:action});
+ };
+ const shortcutAttribute = (action: keyof typeof shortcuts.bindings) => shortcuts.enabled && shortcuts.bindings[action] || undefined;
+ const applyShortcuts = () => {
+  try { const accepted = saveShortcuts(shortcutDraft); setShortcuts(accepted); setShortcutDraft(accepted); setShortcutWarning(''); setStatus('Keyboard shortcuts saved on this device.'); }
+  catch (failure) { setShortcutWarning(String(failure instanceof Error ? failure.message : failure)); }
+ };
  const releasePlayback = () => run(async () => {
   if (!facade.current?.detachTransport) return;
   install(await facade.current.detachTransport()); setStatus('Playback closed. Selection preview is available.');
@@ -150,7 +175,7 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
   const value = String(frame / wave.sampleRate);
   if (event.shiftKey) setEnd(value); else setStart(value);
  };
- return <section className="practice-workspace" aria-label="Practice workspace">
+ return <section className="practice-workspace" aria-label="Practice workspace" onKeyDown={keydown}>
   <div className="practice-heading"><div><h2>Practice workspace</h2><p>{snapshot?.project.name ?? 'Open your original audio'}</p></div><button type="button" onClick={onClose}>Close practice</button></div>
   <div className="practice-actions">
    <button type="button" disabled={busy} onClick={() => sourceInput.current?.click()}>Choose original WAV / relink</button>
@@ -163,14 +188,22 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
    {busy && previewControls && <button type="button" disabled={previewControlBusy} onClick={() => void togglePreview()}>{previewPaused ? 'Resume preview' : 'Pause preview'}</button>}
    {busy && <button type="button" onClick={() => facade.current?.cancel()}>Cancel operation</button>}
   </div>
+  <details className="practice-shortcuts">
+   <summary>Keyboard shortcuts</summary>
+   <p>Shortcuts work while focus is in this workspace. Text fields keep their usual keys, and Space still activates a focused button. Holding a key sends one command.</p>
+   <label><input type="checkbox" checked={shortcutDraft.enabled} onChange={event => setShortcutDraft({...shortcutDraft,enabled:event.target.checked})} /> Enable practice shortcuts</label>
+   <div className="practice-form">{(['play_pause','restart','stop'] as const).map(action => <label key={action}>{action === 'play_pause' ? 'Play / pause shortcut' : action === 'restart' ? 'Restart shortcut' : 'Stop shortcut'}<select value={shortcutDraft.bindings[action]} onChange={event => setShortcutDraft({...shortcutDraft,bindings:{...shortcutDraft.bindings,[action]:event.target.value}})}>{shortcutKeys.map(key => <option key={key} value={key}>{key || 'No shortcut'}</option>)}</select></label>)}</div>
+   <button type="button" onClick={applyShortcuts}>Save shortcuts</button>
+   {shortcutWarning && <p role="alert" className="practice-error">{shortcutWarning}</p>}
+  </details>
   <input className="visually-hidden" ref={sourceInput} type="file" accept=".wav,.wave,audio/wav" onChange={event => { chooseSource(event.target.files?.[0]); event.target.value = ''; }} />
   <input className="visually-hidden" ref={projectInput} type="file" accept=".json,application/json" onChange={event => { loadProject(event.target.files?.[0]); event.target.value = ''; }} />
   {error && <p role="alert" className="practice-error">{error}</p>}<p role="status">{busy ? busyLabel : status}</p>
   {snapshot && <>
    <p className="practice-capability">{snapshot.capabilities.formats.join(', ')} · {duration.toFixed(3)} source seconds · {snapshot.capabilities.streamPreview ? 'Preview the saved selection once at the accepted speed and pitch.' : 'Audio preview is unavailable; this browser needs the processing build and audio support.'} {facade.current?.liveSupported && snapshot.capabilities.streamPreview ? 'Live playback follows the saved speed, pitch and A/B loop.' : 'Live playback is unavailable in this browser.'}</p>
-   <div className="practice-actions"><button type="button" disabled={!snapshot.capabilities.streamPreview || !facade.current?.preview || snapshot.capabilities.liveTransport || busy} onClick={() => void preview()}>Preview selection</button><button type="button" disabled={busy || !(snapshot.capabilities.liveTransport || (facade.current?.liveSupported && snapshot.capabilities.streamPreview)) || snapshot.transport?.state === 'error'} onClick={() => void transport({type: snapshot.transport?.state === 'playing' ? 'pause' : 'play'})}>{snapshot.transport?.state === 'playing' ? 'Pause playback' : 'Play'}</button>
-    <button type="button" disabled={busy || !snapshot.capabilities.liveTransport || snapshot.transport?.state === 'error'} onClick={() => void transport({type:'stop'})}>Stop</button>
-    <button type="button" disabled={busy || !snapshot.capabilities.liveTransport || snapshot.transport?.state === 'error'} onClick={() => void transport({type:'restart'})}>Restart</button>
+   <div className="practice-actions"><button type="button" disabled={!snapshot.capabilities.streamPreview || !facade.current?.preview || snapshot.capabilities.liveTransport || busy} onClick={() => void preview()}>Preview selection</button><button type="button" aria-keyshortcuts={shortcutAttribute('play_pause')} disabled={busy || !canPlay} onClick={() => void togglePlayback()}>{snapshot.transport?.state === 'playing' ? 'Pause playback' : 'Play'}</button>
+    <button type="button" disabled={busy || !snapshot.capabilities.liveTransport || snapshot.transport?.state === 'error'} aria-keyshortcuts={shortcutAttribute('stop')} onClick={() => void transport({type:'stop'})}>Stop</button>
+    <button type="button" disabled={busy || !snapshot.capabilities.liveTransport || snapshot.transport?.state === 'error'} aria-keyshortcuts={shortcutAttribute('restart')} onClick={() => void transport({type:'restart'})}>Restart</button>
     {snapshot.capabilities.liveTransport && <button type="button" disabled={busy} onClick={() => void releasePlayback()}>Close playback</button>}
     {snapshot.transport?.state === 'error' && <button type="button" disabled={busy} onClick={() => void transport({type:'recover'})}>Recover playback</button>}<button type="button" disabled={busy} onClick={() => void overview()}>Full overview</button><button type="button" disabled={busy} onClick={() => void zoom()}>Exact selection zoom</button></div>
    {snapshot.transport && <>
