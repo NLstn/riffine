@@ -20,10 +20,10 @@ const controlMagic uint64 = 0x314350494e464652
 
 // WorkerInfo reports decode/DSP schedule state, never device presentation.
 type WorkerInfo struct {
-	Channels, SampleRate     int
-	Frames                   int64
-	Generation, LastSequence uint64
-	Pending                  int
+	Channels, SampleRate, OutputRate int
+	Frames                           int64
+	Generation, LastSequence         uint64
+	Pending                          int
 }
 
 // ScheduledWorker retains one native helper and two native decoder/DSP slots.
@@ -31,29 +31,39 @@ type WorkerInfo struct {
 // this is deliberately not an engine.OutputDevice: it cannot acknowledge sound.
 // Close/cancel waits for process exit; the caller always owns the original reader.
 type ScheduledWorker struct {
-	mu        sync.Mutex
-	cmd       *exec.Cmd
-	input     io.WriteCloser
-	output    io.ReadCloser
-	cancel    context.CancelFunc
-	waited    bool
-	terminal  error
-	requestID uint64
-	info      audio.Info
+	mu         sync.Mutex
+	cmd        *exec.Cmd
+	input      io.WriteCloser
+	output     io.ReadCloser
+	cancel     context.CancelFunc
+	waited     bool
+	terminal   error
+	requestID  uint64
+	info       audio.Info
+	outputRate int
 }
 
 func (a Adapter) OpenScheduledWorker(ctx context.Context, reader resource.Reader, info audio.Info) (*ScheduledWorker, error) {
+	return a.OpenScheduledWorkerRate(ctx, reader, info, info.SampleRate)
+}
+
+// OpenScheduledWorkerRate negotiates immutable device-rate processing before
+// any generation. It still reports scheduling metadata, never presentation.
+func (a Adapter) OpenScheduledWorkerRate(ctx context.Context, reader resource.Reader, info audio.Info, outputRate int) (*ScheduledWorker, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if err := audio.ValidateInfo(info); err != nil {
 		return nil, err
 	}
+	if outputRate < 8000 || outputRate > 192000 {
+		return nil, errors.New("invalid scheduled output sample rate")
+	}
 	decoder, err := NewDecoder(ctx, a)
 	if err != nil {
 		return nil, err
 	}
-	if decoder.scheduledControl != 1 {
+	if decoder.scheduledControl != 2 {
 		return nil, errors.New("native scheduled control is unsupported; rebuild the helper")
 	}
 	// The request context bounds opening/handshake, not the worker lifetime.
@@ -82,9 +92,12 @@ func (a Adapter) OpenScheduledWorker(ctx context.Context, reader resource.Reader
 		cancel()
 		return nil, err
 	}
-	worker := &ScheduledWorker{cmd: cmd, input: input, output: output, cancel: cancel, info: info}
+	worker := &ScheduledWorker{cmd: cmd, input: input, output: output, cancel: cancel, info: info, outputRate: info.SampleRate}
 	worker.mu.Lock()
 	_, err = worker.exchangeLocked(ctx, [16]uint64{3: 1})
+	if err == nil && outputRate != info.SampleRate {
+		_, err = worker.exchangeLocked(ctx, [16]uint64{3: 5, 4: uint64(outputRate)})
+	}
 	worker.mu.Unlock()
 	if err == nil {
 		err = ctx.Err()
@@ -122,7 +135,7 @@ func (w *ScheduledWorker) exchangeLocked(ctx context.Context, q [16]uint64) (Wor
 		return info, err
 	}
 	w.requestID++
-	q[0], q[1], q[2] = controlMagic, 1, w.requestID
+	q[0], q[1], q[2] = controlMagic, 2, w.requestID
 	var request [128]byte
 	for i, word := range q {
 		binary.LittleEndian.PutUint64(request[i*8:], word)
@@ -153,10 +166,10 @@ func (w *ScheduledWorker) exchangeLocked(ctx context.Context, q [16]uint64) (Wor
 		w.shutdownLocked(err)
 		return WorkerInfo{}, err
 	}
-	if words[0] != controlMagic || words[1] != 1 || words[2] != q[2] || words[3] > 1 {
+	if words[0] != controlMagic || words[1] != 2 || words[2] != q[2] || words[3] > 1 {
 		return protocolError("invalid native control response envelope")
 	}
-	for _, word := range words[10:] {
+	for _, word := range words[11:] {
 		if word != 0 {
 			return protocolError("unexpected native control response fields")
 		}
@@ -164,7 +177,14 @@ func (w *ScheduledWorker) exchangeLocked(ctx context.Context, q [16]uint64) (Wor
 	if words[4] != uint64(w.info.Channels) || words[5] != uint64(w.info.SampleRate) || words[6] != uint64(w.info.Frames) || words[9] > 2 {
 		return protocolError("native control source dimensions or slot bounds changed")
 	}
-	info = WorkerInfo{Channels: int(words[4]), SampleRate: int(words[5]), Frames: int64(words[6]), Generation: words[7], LastSequence: words[8], Pending: int(words[9])}
+	expectedRate := w.outputRate
+	if q[3] == 5 && words[3] == 0 {
+		expectedRate = int(q[4])
+	}
+	if words[10] != uint64(expectedRate) {
+		return protocolError("native negotiated output rate changed")
+	}
+	info = WorkerInfo{OutputRate: int(words[10]), Channels: int(words[4]), SampleRate: int(words[5]), Frames: int64(words[6]), Generation: words[7], LastSequence: words[8], Pending: int(words[9])}
 	message := reply[128:]
 	end := 0
 	for end < len(message) && message[end] != 0 {
@@ -190,6 +210,7 @@ func (w *ScheduledWorker) exchangeLocked(ctx context.Context, q [16]uint64) (Wor
 	if (q[3] == 2 && (info.Generation != q[4] || info.Pending != 0)) || (q[3] == 3 && (info.Generation != q[4] || info.LastSequence != q[5] || info.Pending < 1)) {
 		return protocolError("native control schedule/reset result is inconsistent")
 	}
+	w.outputRate = info.OutputRate
 	return info, nil
 }
 func (w *ScheduledWorker) Info(ctx context.Context) (WorkerInfo, error) {

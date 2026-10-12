@@ -22,8 +22,10 @@ func TestMain(m *testing.M) {
 				fmt.Print(`{"abi":1,"formats":["wav-pcm","flac","mp3"]}`)
 			} else if os.Getenv("RIFFINE_DECODER_TEST_LEGACY_PREVIEW") == "1" {
 				fmt.Print(`{"abi":1,"formats":["wav-pcm","flac","mp3"],"borrowedSources":true}`)
-			} else {
+			} else if os.Getenv("RIFFINE_CONTROL_TEST_LEGACY_VERSION") == "1" {
 				fmt.Print(`{"abi":1,"formats":["wav-pcm","flac","mp3"],"borrowedSources":true,"borrowedPreview":true,"borrowedRender":true,"scheduledControl":1}`)
+			} else {
+				fmt.Print(`{"abi":1,"formats":["wav-pcm","flac","mp3"],"borrowedSources":true,"borrowedPreview":true,"borrowedRender":true,"scheduledControl":2}`)
 			}
 		case "scheduled-control-handle":
 			serveControlFixture()

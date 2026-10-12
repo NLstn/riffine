@@ -25,6 +25,9 @@ int main(void) {
   if(riffine_scheduled_open_handle(UINT64_MAX,&worker,error,sizeof(error))!=1 || worker) return 1;
   riffine_decoder *decoder=0;
   if(riffine_decoder_open_handle(UINT64_MAX,&decoder,error,sizeof(error))!=1 || decoder) return 1;
+  if(riffine_scheduled_set_output_rate(0,44100,error,sizeof(error))!=1) return 1;
+  uint32_t output_rate=0;
+  if(riffine_scheduled_output_rate_get(0,&output_rate,error,sizeof(error))!=1) return 1;
   riffine_scheduled_close(0);
   if(riffine_render_handle(UINT64_MAX,0,0,1,1,0,error,sizeof(error))!=1) return 1;
   riffine_preview_source *source=0;
