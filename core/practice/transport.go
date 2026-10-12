@@ -40,7 +40,8 @@ type liveAttachment struct {
 	reader    resource.Reader
 	// A failed adapter operation may have installed settings before failing.
 	// Recovery reloads committed project settings rather than trusting that state.
-	dirty bool
+	dirty      bool
+	activePlan *project.PracticePlan
 }
 
 func (s *Session) transportConfig(p project.Project, outputRate int) engine.TransportConfig {
@@ -182,6 +183,9 @@ func (s *Session) PollTransport(ctx context.Context) (Snapshot, error) {
 
 func (s *Session) dispatchTransport(ctx context.Context, command Command, p project.Project) error {
 	attachment := s.live
+	if command.Type == "select_practice_plan" || command.Type == "resume_practice_plan" || command.Type == "clear_practice_plan" {
+		return s.dispatchPracticePlan(ctx, command, p)
+	}
 	before := attachment.transport.Snapshot()
 	if command.Type == "recover" {
 		if before.State != "error" && !attachment.dirty {
@@ -192,6 +196,7 @@ func (s *Session) dispatchTransport(ctx context.Context, command Command, p proj
 			attachment.dirty = true
 			return failure(HostFailure, err)
 		}
+		attachment.activePlan = nil
 		before = attachment.transport.Snapshot()
 	} else if before.State == "error" || attachment.dirty {
 		return failure(HostFailure, errors.New("transport requires recovery"))

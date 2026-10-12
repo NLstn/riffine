@@ -82,6 +82,8 @@ type Snapshot struct {
 	Repetitions    uint64  `json:"repetitions"` // completed in current step
 	Speed          float64 `json:"speed"`
 	NextSpeed      float64 `json:"nextSpeed"`
+	TotalSteps     uint64  `json:"totalSteps"`
+	TotalLoops     uint64  `json:"totalLoops"`
 }
 type Run struct {
 	plan                                *Plan
@@ -110,7 +112,7 @@ func (r *Run) Snapshot() Snapshot {
 	if !play {
 		state = "completed"
 	}
-	return Snapshot{State: state, Generation: r.generation, CompletedLoops: r.completed, Step: step, Repetitions: repetitions, Speed: speed, NextSpeed: nextSpeed}
+	return Snapshot{State: state, Generation: r.generation, CompletedLoops: r.completed, Step: step, Repetitions: repetitions, Speed: speed, NextSpeed: nextSpeed, TotalSteps: r.plan.Steps(), TotalLoops: r.plan.TotalLoops()}
 }
 
 // Complete accepts an eligible, fully presented traversal from the transport.
