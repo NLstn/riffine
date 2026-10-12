@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
 import { loadShortcuts, saveShortcuts, shortcutKeys, matchShortcut } from './practice-shortcuts';
+import PracticePlans from './PracticePlans';
 import { BrowserPractice, presentationSnapshot } from './practice';
 import type { EditCommand, LiveCommand, PracticeFacade, PracticeResponse, Snapshot, WaveWindow } from './practice';
 
@@ -15,6 +16,7 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
  const projectInput = useRef<HTMLInputElement>(null);
  const [selectedSource, setSelectedSource] = useState(source);
  const [projectFile, setProjectFile] = useState<File>();
+ const [sourceSession, setSourceSession] = useState(0);
  const [snapshot, setSnapshot] = useState<Snapshot>();
  const [wave, setWave] = useState<WaveWindow>();
  const [busy, setBusy] = useState(false);
@@ -37,7 +39,7 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
  const install = (response: PracticeResponse, syncForms = false) => {
   if (response.snapshot) {
    const current = response.snapshot;
-   setSnapshot(previous => presentationSnapshot(previous, current, syncForms)); if (syncForms) { setSpeed(String(current.project.settings.speed * 100)); setPitch(String(current.project.settings.pitch));
+   setSnapshot(previous => presentationSnapshot(previous, current, syncForms)); if (syncForms) { setSourceSession(previous => previous + 1); setSpeed(String(current.project.settings.speed * 100)); setPitch(String(current.project.settings.pitch));
    setStart(String(current.project.settings.loop.start)); setEnd(String(current.project.settings.loop.end)); setNotes(current.project.annotations.notes ?? ''); }
   }
   if (response.error) throw new Error(`${response.error.code}: ${response.error.message}`);
@@ -89,9 +91,9 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
  const transport = (command: LiveCommand) => run(async () => {
   if (!facade.current?.transport || !snapshot) return;
   install(await facade.current.transport(snapshot, command));
-  setStatus(command.type === 'recover' ? 'Playback recovered. Press Play to start.' : 'Playback updated.');
+  setStatus(command.type === 'recover' ? 'Playback recovered. Press Play to start.' : command.type === 'select_practice_plan' ? 'Practice plan selected. Press Play to start.' : 'Playback updated.');
  });
- const canPlay = !!snapshot && (snapshot.capabilities.liveTransport || (facade.current?.liveSupported && snapshot.capabilities.streamPreview)) && snapshot.transport?.state !== 'error';
+ const canPlay = !!snapshot && (snapshot.capabilities.liveTransport || (facade.current?.liveSupported && snapshot.capabilities.streamPreview)) && snapshot.transport?.state !== 'error' && snapshot.transport?.plan?.state !== 'completed';
  const togglePlayback = () => transport({type:snapshot?.transport?.state === 'playing' ? 'pause' : 'play'});
  const keydown = (event: KeyboardEvent<HTMLElement>) => {
   const action = matchShortcut(event.nativeEvent, shortcuts);
@@ -210,6 +212,8 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
     <p aria-label="Playback position">{snapshot.transport.state} · {(snapshot.transport.sourceFrame / snapshot.project.track.audio.sampleRate).toFixed(3)} source seconds · {snapshot.transport.completedLoops} completed loops</p>
     <div className="practice-form"><label>Seek (source seconds)<input type="number" step={1 / snapshot.project.track.audio.sampleRate} value={seekSeconds} onChange={event => setSeekSeconds(event.target.value)} disabled={busy} /></label><button type="button" disabled={busy || snapshot.transport.state === 'error'} onClick={() => void transport({type:'seek',position:Math.round(Number(seekSeconds)*snapshot.project.track.audio.sampleRate)})}>Seek</button></div>
    </>}
+   {snapshot.transport?.config && <p>Playback selection: {snapshot.transport.config.loopEnabled ? `${(snapshot.transport.config.loopStart / snapshot.project.track.audio.sampleRate).toFixed(3)}–${(snapshot.transport.config.loopEnd / snapshot.project.track.audio.sampleRate).toFixed(3)} source seconds` : 'full track'} · {(snapshot.transport.config.speed * 100).toFixed(1)}% speed</p>}
+   <PracticePlans key={sourceSession} snapshot={snapshot} busy={busy} liveAvailable={!!((facade.current?.liveSupported && snapshot.capabilities.streamPreview) || snapshot.capabilities.liveTransport) && snapshot.transport?.state !== 'error'} edit={edit} transport={transport} />
    {wave && <><svg className="practice-waveform" viewBox="0 0 1000 160" role="img" aria-label={`${detailView ? 'Exact selection' : 'Track overview'} waveform; click sets selection start, Shift-click sets end`} onClick={selectInView}>
     <rect x="0" y="0" width="1000" height="160" fill="transparent" />
     {wave.cells.map((cell, index) => cell.channels.map((peak, channel) => <line key={`${index}-${channel}`} x1={(cell.startFrame - viewStart) / viewLength * 1000} x2={(cell.startFrame - viewStart) / viewLength * 1000} y1={40 + channel * 80 - peak.max * 35} y2={40 + channel * 80 - peak.min * 35} stroke="currentColor" strokeWidth="2" />))}

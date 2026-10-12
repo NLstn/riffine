@@ -5,6 +5,7 @@ import { Worker } from 'node:worker_threads';
 import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { LiveOutputHost } from '../web/public/practice/live-output-host.mjs';
+const planMode=process.env.RIFFINE_LIVE_PLAN === '1';
 const speed=Number(process.env.RIFFINE_LIVE_SPEED ?? '.75');
 const pitch=Number(process.env.RIFFINE_LIVE_PITCH ?? '3');
 let Processor;
@@ -28,7 +29,7 @@ const worker = new Worker(new URL('./browser-practice-node-worker.mjs',import.me
 let readyResolve,readyReject,next=0,sequence=0,maxRead=0;
 const ready=new Promise((resolve,reject)=>{readyResolve=resolve;readyReject=reject;});
 const pending=new Map();
-const timeout=setTimeout(()=>{for(const call of pending.values()) call.reject(new Error('Live binding timed out.'));readyReject(new Error('Live binding timed out.'));worker.terminate();},30000);
+const timeout=setTimeout(()=>{for(const call of pending.values()) call.reject(new Error('Live binding timed out.'));readyReject(new Error('Live binding timed out.'));worker.terminate();},planMode ? 60000 : 30000);
 async function receiveHost(message) {
  try {
   let result={};
@@ -70,6 +71,48 @@ try {
  await ready;
  let response=requireResponse(await call({type:'import',source:'source',document:'project'}));
  assert.equal(response.snapshot.capabilities.liveTransport,false);
+ if (planMode) {
+  await command({type:'set_annotations',annotations:{regions:[{id:'phrase',label:'Phrase',start:.25,end:.75}]}});
+  const definition={id:'ladder',label:'60–100',regionId:'phrase',ladder:{startSpeed:.6,targetSpeed:1,incrementPoints:5,loopsPerStep:4,endBehavior:'stop'}};
+  await command({type:'set_practice_plans',practicePlans:[definition]});
+  response=requireResponse(await call({type:'attach_transport'}));sequence=response.snapshot.sequence;
+  let snapshot=await command({type:'select_practice_plan',planId:'ladder'});
+  assert.equal(snapshot.transport.plan.totalSteps,9);assert.equal(snapshot.transport.plan.totalLoops,36);assert.equal(snapshot.state,'ready');assert.equal(context.state,'suspended');
+  const selectedSequence=sequence;
+  const invalid=await call({type:'command',command:{version:1,sequence:sequence+1,type:'select_practice_plan',planId:'missing'}});
+  assert.equal(invalid.error.code,'invalid_command');assert.equal(invalid.snapshot.sequence,selectedSequence);
+  await command({type:'play'});
+  snapshot=requireResponse(await call({type:'poll_transport'})).snapshot;
+  assert.equal(snapshot.transport.completedLoops,0);
+  pumping=true;
+  const completed=[];
+  for(let ordinal=1;ordinal<=36;ordinal++) {
+   snapshot=await loops(ordinal);
+   const batch=requireResponse(await call({type:'events'})).events;
+   assert.equal(batch.dropped,0);
+   completed.push(...batch.events.filter(event=>event.type==='traversal_completed').map(event=>event.transport));
+   if(ordinal===4) {
+    await command({type:'set_practice_plans',practicePlans:[{...definition,label:'Updated definition',ladder:{...definition.ladder,targetSpeed:.8,loopsPerStep:1}}]});
+    snapshot=requireResponse(await call({type:'poll_transport'})).snapshot;
+    assert.equal(snapshot.activePracticePlan.label,'60–100');assert.equal(snapshot.transport.plan.totalLoops,36);
+   }
+  }
+  assert.equal(snapshot.state,'stopped');assert.equal(snapshot.transport.plan.state,'completed');assert.equal(snapshot.transport.plan.completedLoops,36);
+  assert.equal(completed.length,36);
+  const expectedSpeeds=[.6,.65,.7,.75,.8,.85,.9,.95,1];
+  completed.forEach((event,index)=>{assert.equal(event.completedLoops,index+1);assert.equal(event.speed,expectedSpeeds[Math.floor(index/4)]);assert.equal(event.startFrame,12000);assert.equal(event.endFrame,36000);});
+  const exported=JSON.parse(requireResponse(await call({type:'export'})).document);
+  assert.equal(exported.practicePlans[0].label,'Updated definition');assert.equal(exported.activePracticePlan,undefined);assert.equal(exported.transport,undefined);
+  assert.equal(exported.settings.speed,1);assert.equal(exported.settings.loop.enabled,false);
+  snapshot=await command({type:'restart'});assert.equal(snapshot.transport.plan.completedLoops,0);
+  snapshot=await command({type:'set_parameters',speed:.8});assert.equal(snapshot.transport.plan.state,'paused');
+  snapshot=await command({type:'resume_practice_plan'});assert.equal(snapshot.transport.plan.state,'running');assert.equal(snapshot.transport.config.speed,.6);assert.equal(snapshot.project.settings.speed,.8);
+  snapshot=await command({type:'clear_practice_plan'});assert.equal(snapshot.state,'ready');assert.equal(snapshot.transport.plan,undefined);assert.equal(snapshot.activePracticePlan,undefined);assert.equal(snapshot.transport.config.loopEnabled,false);assert.equal(snapshot.transport.config.speed,.8);
+  snapshot=await command({type:'select_practice_plan',planId:'ladder'});assert.equal(snapshot.transport.plan.totalLoops,5);assert.equal(snapshot.activePracticePlan.label,'Updated definition');
+  response=requireResponse(await call({type:'detach_transport'}));sequence=response.snapshot.sequence;
+  assert.equal(response.snapshot.activePracticePlan,undefined);assert.equal(context.closes,1);assert(maxRead<=65536);
+  console.log(JSON.stringify({actualGoLiveFactory:true,actualCPPWASM:true,savedRegionSelected:true,plannedSteps:9,presentedLoops:completed.length,speeds:expectedSpeeds,queuedFramesDoNotAdvancePlan:true,definitionEditsKeepCurrentRun:true,manualOverrideAndExplicitResume:true,clearRestoresManualSettings:true,runtimeAbsentFromExport:true,maximumFileRead:maxRead,deviceClockIsSynthetic:true},null,2));
+ } else {
  await command({type:'set_loop',loop:{enabled:true,start:.25,end:.75}});
  await command({type:'set_parameters',speed,pitch});
  response=requireResponse(await call({type:'attach_transport'}));sequence=response.snapshot.sequence;
@@ -133,4 +176,5 @@ try {
  response=requireResponse(await call({type:'attach_transport'}));sequence=response.snapshot.sequence;
  response=requireResponse(await call({type:'detach_transport'}));sequence=response.snapshot.sequence;assert.equal(context.closes,1);
  console.log(JSON.stringify({actualGoLiveFactory:true,actualCPPWASM:true,presentedLoops:pausedLoops,noQueuedFrameCompletion:true,pausedSourceFrame:pausedFrame,pausePreservesPosition:true,seekResumePartialTraversalNotCounted:true,stoppedResetsCounters:true,detachedClosesContext:true,successfulSequence:sequence,maximumFileRead:maxRead,deviceClockIsSynthetic:true,speed,pitch,clockFailureQuiescesBeforeGoError:true,freshAttachmentRecoversPlayback:true,cancelOpeningAwaitsSourceAndDeviceFence:true,liveParameterChangesResetGenerationAndContinue:true},null,2));
+ }
 } finally {clearInterval(pump);clearTimeout(timeout);await host?.close();await worker.terminate();}

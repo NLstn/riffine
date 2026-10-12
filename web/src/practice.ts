@@ -4,16 +4,19 @@ export interface Peak { min: number; max: number }
 export interface WaveWindow { version: number; sha256: string; sampleRate: number; sourceFrames: number; requestedStart: number; requestedEnd: number; framesPerCell: number; cells: { startFrame: number; endFrame: number; channels: Peak[] }[] }
 export interface Region { id: string; label: string; start: number; end: number; notes?: string }
 export interface Annotations { notes?: string; regions?: Region[]; markers?: { id: string; kind: 'section' | 'measure' | 'beat'; label: string; position: number; measure?: number; beat?: number; notes?: string }[]; loops?: { id: string; label: string; regionId: string }[]; bookmarks?: { id: string; label: string; position: number }[] }
-export interface Project { version: number; name: string; track: { path: string; audio: { encoding: string; sampleRate: number; channels: number; frames: number; sha256: string } }; settings: { speed: number; pitch: number; loop: { enabled: boolean; start: number; end: number } }; annotations: Annotations; practicePlans?: unknown[] }
-export interface Snapshot { version: number; sequence: number; state: string; transport?: { generation: number; state: string; sourceFrame: number; consumedOutputFrame: number; completedLoops: number; error?: string }; project: Project; capabilities: { formats: string[]; offlineRender: boolean; liveTransport: boolean; streamPreview?: boolean } }
+export interface LadderDefinition { startSpeed: number; targetSpeed: number; incrementPoints: number; loopsPerStep: number; endBehavior: 'stop' | 'hold' }
+export interface PracticePlan { id: string; label: string; regionId: string; ladder: LadderDefinition }
+export interface PlanProgress { state: 'running' | 'paused' | 'completed'; completedLoops: number; step: number; repetitions: number; speed: number; nextSpeed: number; totalSteps: number; totalLoops: number }
+export interface Project { version: number; name: string; track: { path: string; audio: { encoding: string; sampleRate: number; channels: number; frames: number; sha256: string } }; settings: { speed: number; pitch: number; loop: { enabled: boolean; start: number; end: number } }; annotations: Annotations; practicePlans?: PracticePlan[] }
+export interface Snapshot { version: number; sequence: number; state: string; transport?: { generation: number; state: string; sourceFrame: number; consumedOutputFrame: number; completedLoops: number; error?: string; config: { sampleRate: number; loopEnabled: boolean; loopStart: number; loopEnd: number; speed: number }; plan?: PlanProgress }; activePracticePlan?: PracticePlan; project: Project; capabilities: { formats: string[]; offlineRender: boolean; liveTransport: boolean; streamPreview?: boolean } }
 // A successful source open starts a new session with sequence zero. Only
 // in-session replies can be compared by sequence to suppress stale UI updates.
 export function presentationSnapshot(previous: Snapshot | undefined, current: Snapshot, newSession = false): Snapshot {
  return !newSession && previous && previous.sequence > current.sequence ? previous : current;
 }
-export type EditCommand = { type: 'set_parameters'; speed?: number; pitch?: number } | { type: 'set_loop'; loop: Project['settings']['loop'] } | { type: 'set_annotations'; annotations: Annotations };
+export type EditCommand = { type: 'set_parameters'; speed?: number; pitch?: number } | { type: 'set_loop'; loop: Project['settings']['loop'] } | { type: 'set_annotations'; annotations: Annotations } | { type: 'set_practice_plans'; practicePlans: PracticePlan[] };
 export interface PracticeResponse { version: number; snapshot?: Snapshot; window?: WaveWindow; document?: string; preview?: { outputFrames: number; copiedFrames: number; underrunFrames: number; startupMilliseconds: number }; events?: { events: { sequence: number; type: string }[]; dropped: number }; error?: { version: number; code: string; message: string } }
-export type LiveCommand = { type: 'play' | 'pause' | 'stop' | 'restart' | 'recover' } | { type: 'seek'; position: number };
+export type LiveCommand = { type: 'play' | 'pause' | 'stop' | 'restart' | 'recover' | 'resume_practice_plan' | 'clear_practice_plan' } | { type: 'seek'; position: number } | { type: 'select_practice_plan'; planId: string };
 export interface PracticeFacade {
  open(source: File, project?: File): Promise<PracticeResponse>;
  command(snapshot: Snapshot, command: EditCommand): Promise<PracticeResponse>;

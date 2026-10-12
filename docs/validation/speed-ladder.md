@@ -62,9 +62,8 @@ bin/riffine plan --project planned.json --id ladder
 ```
 
 `plan` returns an explicit schedule preview (loop ordinals and speeds); it does not
-play or pretend to count a practice session. Live session capability remains false
-until the persistent presentation-aware native adapter and session binding are
-connected. The engine's `set_plan` command requires an enabled source selection;
+play or pretend to count a practice session. The browser live session now selects saved definitions by ID; see
+saved-plan-runtime.md. Native product wiring remains pending. The engine's `set_plan` command requires an enabled source selection;
 the session's saved definition references identify which region to select.
 
 ## Evidence and outstanding work

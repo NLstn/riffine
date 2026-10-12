@@ -139,3 +139,40 @@ func TestParameterEditAtFinalPendingBoundaryCannotRestartCompletedPlan(t *testin
 		t.Fatal("edit restarted completed ladder", final)
 	}
 }
+
+func TestLoadPlanValidatesBeforeTouchingRunningDevice(t *testing.T) {
+	tr, f := setupTransport(t)
+	command(t, tr, "play", nil)
+	before := tr.Snapshot()
+	generationCount := len(f.generations)
+	invalid := ladder.Definition{StartSpeed: .6, TargetSpeed: 1, IncrementPoints: 0, LoopsPerStep: 4, EndBehavior: "stop"}
+	if err := tr.LoadPlan(context.Background(), before.Config, invalid); err == nil {
+		t.Fatal("invalid ladder accepted")
+	}
+	valid := invalid
+	valid.IncrementPoints = 5
+	invalidConfig := before.Config
+	invalidConfig.LoopEnabled = false
+	if err := tr.LoadPlan(context.Background(), invalidConfig, valid); err == nil {
+		t.Fatal("disabled loop accepted")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := tr.LoadPlan(ctx, before.Config, valid); err == nil {
+		t.Fatal("cancelled load accepted")
+	}
+	after := tr.Snapshot()
+	if after.Generation != before.Generation || after.Sequence != before.Sequence || after.State != before.State || len(f.generations) != generationCount || !f.running {
+		t.Fatal("validation changed device", after)
+	}
+	first := f.schedules[0]
+	f.acks = []OutputAcknowledgement{consumed(first, first.OutputEnd)}
+	if err := tr.LoadPlan(context.Background(), before.Config, valid); err != nil {
+		t.Fatal(err)
+	}
+	after = tr.Snapshot()
+	events := tr.DrainEvents()
+	if after.State != "ready" || after.Plan.State != "paused" || after.Plan.TotalLoops != 36 || after.CompletedLoops != 0 || f.running || len(events) != 1 || events[0].Generation != first.Generation {
+		t.Fatal(after, events)
+	}
+}

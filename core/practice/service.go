@@ -69,16 +69,18 @@ type Command struct {
 	Loop          *project.Loop           `json:"loop,omitempty"`
 	Annotations   *project.Annotations    `json:"annotations,omitempty"`
 	PracticePlans *[]project.PracticePlan `json:"practicePlans,omitempty"`
+	PlanID        *string                 `json:"planId,omitempty"`
 	Position      *int64                  `json:"position,omitempty"`
 }
 type Snapshot struct {
-	Version      int                       `json:"version"`
-	Sequence     uint64                    `json:"sequence"`
-	State        string                    `json:"state"`
-	Project      project.Project           `json:"project"`
-	Capabilities Capabilities              `json:"capabilities"`
-	Revision     string                    `json:"revision,omitempty"`
-	Transport    *engine.TransportSnapshot `json:"transport,omitempty"`
+	Version            int                       `json:"version"`
+	Sequence           uint64                    `json:"sequence"`
+	State              string                    `json:"state"`
+	Project            project.Project           `json:"project"`
+	Capabilities       Capabilities              `json:"capabilities"`
+	Revision           string                    `json:"revision,omitempty"`
+	Transport          *engine.TransportSnapshot `json:"transport,omitempty"`
+	ActivePracticePlan *project.PracticePlan     `json:"activePracticePlan,omitempty"`
 }
 type Event struct {
 	Version   int                    `json:"version"`
@@ -185,6 +187,10 @@ func (s *Session) snapshot() Snapshot {
 		snapshot.Transport = &transport
 		snapshot.State = transport.State
 		snapshot.Capabilities.LiveTransport = true
+		if s.live.activePlan != nil {
+			plan := *s.live.activePlan
+			snapshot.ActivePracticePlan = &plan
+		}
 	}
 	return snapshot
 }
@@ -231,7 +237,17 @@ func (s *Session) Dispatch(ctx context.Context, c Command) (Snapshot, error) {
 	if c.Position != nil && c.Type != "seek" {
 		return reject(InvalidCommand, "position is only valid for seek")
 	}
+	if c.PlanID != nil && c.Type != "select_practice_plan" {
+		return reject(InvalidCommand, "planId is only valid for select_practice_plan")
+	}
 	switch c.Type {
+	case "select_practice_plan", "resume_practice_plan", "clear_practice_plan":
+		if c.PracticePlans != nil || c.Annotations != nil || c.Loop != nil || c.Speed != nil || c.Pitch != nil || c.Position != nil || (c.Type == "select_practice_plan") != (c.PlanID != nil) {
+			return reject(InvalidCommand, "practice plan command has unexpected or missing fields")
+		}
+		if s.live == nil {
+			return reject(UnsupportedCapability, "live transport is unavailable")
+		}
 	case "set_parameters":
 		if c.PracticePlans != nil || c.Annotations != nil || c.Loop != nil || (c.Speed == nil && c.Pitch == nil) {
 			return reject(InvalidCommand, "set_parameters requires speed and/or pitch only")
@@ -273,7 +289,7 @@ func (s *Session) Dispatch(ctx context.Context, c Command) (Snapshot, error) {
 	if err := ctx.Err(); err != nil {
 		return s.snapshot(), failure(Cancelled, err)
 	}
-	if s.live != nil && (c.Type == "set_parameters" || c.Type == "set_loop" || c.Type == "play" || c.Type == "pause" || c.Type == "stop" || c.Type == "restart" || c.Type == "recover" || c.Type == "seek") {
+	if s.live != nil && (c.Type == "set_parameters" || c.Type == "set_loop" || c.Type == "play" || c.Type == "pause" || c.Type == "stop" || c.Type == "restart" || c.Type == "recover" || c.Type == "seek" || c.Type == "select_practice_plan" || c.Type == "resume_practice_plan" || c.Type == "clear_practice_plan") {
 		if err := s.dispatchTransport(ctx, c, p); err != nil {
 			return s.snapshot(), err
 		}

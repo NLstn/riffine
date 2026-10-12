@@ -33,8 +33,10 @@ and bounded JSON binding. It does not enable audio in a production host.
 
 The binding operations are `attach_transport`, `detach_transport` and
 `poll_transport`. Hosts render returned snapshots; they do not duplicate policy.
-The Go service's factory is optional. The browser Go worker, CLI and mobile spike
-product wrappers currently provide no production device factory.
+The Go service's factory is optional. The browser Go worker now supplies a live
+factory; see browser-live-binding.md. CLI and mobile product wrappers still need
+production device factories. Saved-plan selection/resume/clear use this same
+versioned session; see saved-plan-runtime.md.
 
 ## Verification
 
@@ -58,9 +60,8 @@ snapshots for failed start and acknowledgement drain.
 
 ## Remaining work
 
-No production factory attests device presentation yet. Native preview callback
-submission counts remain diagnostics. Browser AudioWorklet scheduling, native
-hardware clocks, mobile lifecycle/device recovery, audible boundary behavior,
-physical-device latency/listening and saved ladder execution through this session
-remain pending. No UI clock or synthetic acknowledgement enables production live
+The browser factory derives presentation from AudioContext output timestamps.
+Native preview callback submission counts remain diagnostics. Native hardware
+clocks, mobile lifecycle/device recovery, audible boundary behavior and independent
+physical-device latency/listening evidence remain pending. No UI clock or synthetic acknowledgement enables production live
 capability. No runtime count is written as practice activity.

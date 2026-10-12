@@ -161,6 +161,30 @@ func (t *Transport) reset(ctx context.Context) error {
 func (t *Transport) Load(ctx context.Context, c TransportConfig) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	return t.load(ctx, c, nil)
+}
+
+// LoadPlan selects a compiled speed plan and its source loop as one resource
+// boundary. It starts ready/paused; Play begins the run. Old acknowledged events
+// remain drainable, and no saved project settings are implied by this operation.
+func (t *Transport) LoadPlan(ctx context.Context, c TransportConfig, definition ladder.Definition) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	plan, err := ladder.Compile(definition)
+	if err != nil {
+		return err
+	}
+	if !c.LoopEnabled {
+		return errors.New("practice plan requires an enabled source loop")
+	}
+	c.Speed = plan.Definition().StartSpeed
+	return t.load(ctx, c, plan)
+}
+
+func (t *Transport) load(ctx context.Context, c TransportConfig, plan *ladder.Plan) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -181,9 +205,22 @@ func (t *Transport) Load(ctx context.Context, c TransportConfig) error {
 	t.snapshot.Error = ""
 	t.snapshot.CompletedLoops = 0
 	t.snapshot.SourceFrame, _ = t.bounds()
-	t.events = nil
 	t.resumeEligible = true
 	t.planRun = nil
+	t.autoResumePlan = plan != nil
+	if plan == nil {
+		t.events = nil
+	} else {
+		if err := ctx.Err(); err != nil {
+			return t.fail(err)
+		}
+		run, err := ladder.Start(plan, t.snapshot.Generation)
+		if err != nil {
+			return t.fail(err)
+		}
+		run.Pause()
+		t.planRun = run
+	}
 	return nil
 }
 func (t *Transport) plan(ctx context.Context, start int64, eligible bool) error {
