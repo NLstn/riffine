@@ -220,7 +220,7 @@ tbody tr:hover .track-number > span, .track-play-button.is-playing + span { disp
   .close-player-button { grid-column: 2; grid-row: 1; }
 }
 
-.practice-workspace { margin: 24px 0; padding: 24px; background: var(--surface, #fff); border: 1px solid #d6d9d5; border-radius: 16px; }
+.practice-workspace { color: #203b2b; margin: 24px 0; padding: 24px; background: var(--surface, #fff); border: 1px solid #d6d9d5; border-radius: 16px; }
 .practice-heading, .practice-actions, .practice-form { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 16px 0; }
 .practice-heading { justify-content: space-between; }
 .practice-workspace h2 { margin: 0; }
