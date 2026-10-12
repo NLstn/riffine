@@ -26,6 +26,9 @@ int main(void) {
   riffine_scheduled_close(0);
   riffine_preview_source *source=0;
   if(riffine_preview_open(0,0,1,1,0,&source,error,sizeof(error))!=1 || source) return 1;
+  if(riffine_preview_open_handle(UINT64_MAX,0,1,1,0,&source,error,sizeof(error))!=1 || source) return 1;
+  riffine_preview_report preview_report;
+  if(riffine_preview_handle(UINT64_MAX,0,1,1,0,1,&preview_report,error,sizeof(error))!=1 || preview_report.output_frames) return 1;
   riffine_selection *selection=0;
   float input=.2f,output=0;
   uint32_t count=0,needs_input=0;

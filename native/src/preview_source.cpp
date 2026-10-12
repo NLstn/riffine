@@ -28,15 +28,16 @@ template<class F> int boundary(char *error,size_t size,F f) noexcept {
 }
 void dsp(int result,char *error) { if(result) throw std::runtime_error(error); }
 }
-int riffine_preview_open(const char *path,int64_t start,int64_t end,double speed,double pitch,
+static int previewOpen(const char *path,uint64_t handle,bool borrowed,int64_t start,int64_t end,double speed,double pitch,
   riffine_preview_source **source,char *error,size_t size) {
   if(source) *source=nullptr;
   return boundary(error,size,[&] {
-    require(path && source,"input and source result are required");
+    require((borrowed || path) && source,"input and source result are required");
     require(start>=0 && end>start && std::isfinite(speed) && speed>=.25 && speed<=2 &&
       std::isfinite(pitch) && pitch>=-12 && pitch<=12,"invalid preview range or parameters");
     auto s=std::make_unique<riffine_preview_source>();
-    require(riffine_decoder_open_file(path,&s->decoder,error,size)==0,"cannot open preview source");
+    auto result=borrowed ? riffine_decoder_open_handle(handle,&s->decoder,error,size) : riffine_decoder_open_file(path,&s->decoder,error,size);
+    require(result==0,"cannot open preview source");
     riffine_decoder_info sourceInfo{};
     require(riffine_decoder_info_get(s->decoder,&sourceInfo,error,size)==0 && uint64_t(end)<=sourceInfo.frames,"preview range exceeds source");
     s->channels=sourceInfo.channels;s->rate=sourceInfo.sample_rate;
@@ -52,6 +53,12 @@ int riffine_preview_open(const char *path,int64_t start,int64_t end,double speed
     s->input.resize(512*s->channels);
     *source=s.release();
   });
+}
+int riffine_preview_open(const char *path,int64_t start,int64_t end,double speed,double pitch,riffine_preview_source **source,char *error,size_t size){
+ return previewOpen(path,0,false,start,end,speed,pitch,source,error,size);
+}
+int riffine_preview_open_handle(uint64_t handle,int64_t start,int64_t end,double speed,double pitch,riffine_preview_source **source,char *error,size_t size){
+ return previewOpen(nullptr,handle,true,start,end,speed,pitch,source,error,size);
 }
 int riffine_preview_info_get(const riffine_preview_source *s,riffine_preview_info *info,char *error,size_t size) {
   return boundary(error,size,[&] {require(s && info,"source and info are required");*info={s->channels,s->rate,s->expected,s->decoded};});

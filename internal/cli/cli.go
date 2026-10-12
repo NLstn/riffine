@@ -180,7 +180,12 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 		}
 		adapter = native.Adapter{Executable: helper, Stderr: errOut, SilentPreview: silent}
 		service.Renderer = adapter
-		service.Previewer = adapter
+		if command == "preview" {
+			if err := adapter.CheckSourcePreview(ctx); err != nil {
+				return err
+			}
+			service.SourcePreviewer = adapter
+		}
 	}
 	session, err := service.Open(ctx, proj)
 	if err != nil {

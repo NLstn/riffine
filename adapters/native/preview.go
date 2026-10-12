@@ -11,7 +11,9 @@ import (
 	"os/exec"
 	"strconv"
 
+	"github.com/NLstn/riffine/core/audio"
 	"github.com/NLstn/riffine/core/engine"
+	"github.com/NLstn/riffine/core/resource"
 )
 
 // boundedReport drains stdout with fixed memory, even for a faulty helper.
@@ -52,6 +54,54 @@ func (a Adapter) Preview(ctx context.Context, r engine.PreviewRequest) (engine.P
 	cmd := exec.CommandContext(ctx, a.Executable, "preview", r.Source,
 		strconv.FormatInt(r.StartFrame, 10), strconv.FormatInt(r.EndFrame, 10),
 		strconv.FormatFloat(r.Speed, 'g', -1, 64), strconv.FormatFloat(r.Pitch, 'g', -1, 64), mode)
+	return a.runPreview(ctx, r, cmd, mode)
+}
+
+// CheckSourcePreview rejects helpers that would reopen a mutable source path.
+func (a Adapter) CheckSourcePreview(ctx context.Context) error {
+	d, err := NewDecoder(ctx, a)
+	if err != nil {
+		return err
+	}
+	if !d.borrowedPreview {
+		return errors.New("native source preview is unsupported; rebuild the helper with borrowed-preview support")
+	}
+	return nil
+}
+
+// PreviewSource processes the already verified borrowed resource. The caller
+// retains its reader; helper exit is the decoder/device teardown fence.
+func (a Adapter) PreviewSource(ctx context.Context, reader resource.Reader, info audio.Info, r engine.PreviewRequest) (engine.PreviewReport, error) {
+	if err := ctx.Err(); err != nil {
+		return engine.PreviewReport{}, err
+	}
+	if err := audio.ValidateInfo(info); err != nil {
+		return engine.PreviewReport{}, err
+	}
+	if r.StartFrame < 0 || r.EndFrame <= r.StartFrame || r.EndFrame > info.Frames || math.IsNaN(r.Speed) || math.IsInf(r.Speed, 0) || r.Speed < .25 || r.Speed > 2 || math.IsNaN(r.Pitch) || math.IsInf(r.Pitch, 0) || r.Pitch < -12 || r.Pitch > 12 {
+		return engine.PreviewReport{}, errors.New("invalid source preview request")
+	}
+	mode := "system"
+	if a.SilentPreview {
+		mode = "null"
+	}
+	if err := a.CheckSourcePreview(ctx); err != nil {
+		return engine.PreviewReport{}, err
+	}
+	cmd, release, err := a.sourceCommand(ctx, reader, "preview-handle", strconv.FormatInt(r.StartFrame, 10), strconv.FormatInt(r.EndFrame, 10), strconv.FormatFloat(r.Speed, 'g', -1, 64), strconv.FormatFloat(r.Pitch, 'g', -1, 64), mode)
+	if err != nil {
+		return engine.PreviewReport{}, err
+	}
+	defer release()
+	report, err := a.runPreview(ctx, r, cmd, mode)
+	if err == nil && (report.Channels != info.Channels || report.SampleRate != info.SampleRate) {
+		return engine.PreviewReport{}, errors.New("preview source dimensions changed")
+	}
+	return report, err
+}
+
+func (a Adapter) runPreview(ctx context.Context, r engine.PreviewRequest, cmd *exec.Cmd, mode string) (engine.PreviewReport, error) {
+	var report engine.PreviewReport
 	var out boundedReport
 	cmd.Stdout = &out
 	cmd.Stderr = a.Stderr
