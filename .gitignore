@@ -16,3 +16,6 @@
 web/public/practice/dsp.mjs
 web/public/practice/riffine-browser-dsp.wasm
 web/public/practice/licenses/
+
+# Generated browser MP3 demo copied from the licensed native fixture.
+/web/public/practice/demo.mp3
