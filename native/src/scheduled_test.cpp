@@ -10,6 +10,7 @@
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <vector>
 static bool trackAllocations=false;
 static unsigned allocations=0;
