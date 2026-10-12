@@ -5,6 +5,8 @@
 #include "riffine_preview.h"
 #include "encoded_file.h"
 #include <algorithm>
+#include <array>
+#include <utility>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -98,7 +100,7 @@ void rendered(const fs::path &path,uint64_t handle,const riffine_schedule &s){
  check(fs::remove(output),"cannot remove rendered fixture");
 }
 std::vector<float> rateReference(const fs::path &path,const riffine_schedule &s,uint32_t rate){
- char text[512];riffine_decoder *decoder=nullptr;auto name=path.u8string();ok(riffine_decoder_open_file(name.c_str(),&decoder,error,sizeof(error)));
+ riffine_decoder *decoder=nullptr;auto name=path.u8string();ok(riffine_decoder_open_file(name.c_str(),&decoder,error,sizeof(error)));
  std::unique_ptr<riffine_decoder,decltype(&riffine_decoder_close)> d(decoder,riffine_decoder_close);ok(riffine_decoder_seek(decoder,s.start_frame,error,sizeof(error)));
  riffine_rate_selection *selection=nullptr;ok(riffine_rate_selection_create(2,48000,rate,s.end_frame-s.start_frame,s.speed,s.semitones,&selection,error,sizeof(error)));
  std::unique_ptr<riffine_rate_selection,decltype(&riffine_rate_selection_destroy)> p(selection,riffine_rate_selection_destroy);
