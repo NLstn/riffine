@@ -9,7 +9,8 @@ extern "C" {
  * Opens an immutable UTF-8 source read-only and retains two decoder cursors.
  * The host supplies schedules compiled by Go; this worker never repeats audio,
  * chooses speeds, counts practice loops or acknowledges presentation. Source and
- * output rates must agree. Resource verification and device clocks are host work.
+ * output rates default to source rate; configure device rate before first reset.
+ * Resource verification and device clocks are host work.
  * At most two selections pending; input reads <=512 and output reads <=8192.
  * Reset/destroy require caller quiescence. Runtime processing errors poison the
  * worker; destroy/recreate. Invalid arguments leave pending schedules unchanged. */
@@ -30,6 +31,9 @@ int riffine_scheduled_open(const char *path,riffine_scheduled_worker **worker,ch
 /* Same worker using the already verified borrowed OS source, without opening
  * its path again. Each decoder retains its own duplicate/offset cursor. */
 int riffine_scheduled_open_handle(uint64_t handle,riffine_scheduled_worker **worker,char *error,size_t size);
+/* Configure before any generation. Reset retains this negotiated rate. */
+int riffine_scheduled_set_output_rate(riffine_scheduled_worker *,uint32_t,char *,size_t);
+int riffine_scheduled_output_rate_get(const riffine_scheduled_worker *,uint32_t *,char *,size_t);
 int riffine_scheduled_info_get(const riffine_scheduled_worker *,riffine_scheduled_info *,char *,size_t);
 int riffine_scheduled_reset(riffine_scheduled_worker *,uint64_t generation,char *,size_t);
 int riffine_scheduled_submit(riffine_scheduled_worker *,const riffine_schedule *,char *,size_t);

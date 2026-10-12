@@ -18,7 +18,8 @@ double floating(uint64_t word){double value;static_assert(sizeof(value)==sizeof(
 void reply(riffine_scheduled_worker *worker,uint64_t id,int status,const char *message){
  std::array<unsigned char,640> bytes{};riffine_scheduled_info info{};char error[512];
  if(riffine_scheduled_info_get(worker,&info,error,sizeof(error)))throw std::runtime_error(error);
- Words words{magic,1,id,uint64_t(status),info.channels,info.sample_rate,info.source_frames,info.generation,info.last_sequence,info.pending};
+ uint32_t outputRate=0;if(riffine_scheduled_output_rate_get(worker,&outputRate,error,sizeof(error)))throw std::runtime_error(error);
+ Words words{magic,2,id,uint64_t(status),info.channels,info.sample_rate,info.source_frames,info.generation,info.last_sequence,info.pending,outputRate};
  encode(words,bytes.data());if(status)std::snprintf(reinterpret_cast<char*>(bytes.data()+128),512,"%s",message);
  if(std::fwrite(bytes.data(),1,bytes.size(),stdout)!=bytes.size()||std::fflush(stdout)!=0)throw std::runtime_error("cannot write native control response");
 }
@@ -37,14 +38,15 @@ int riffine_scheduled_control(uint64_t handle){
    if(!n&&std::feof(stdin))return 0;
    if(n!=bytes.size())throw std::runtime_error("truncated native control request");
    auto q=decode(bytes.data());
-   if(q[0]!=magic||q[1]!=1||last==UINT64_MAX||q[2]!=last+1)throw std::runtime_error("invalid native control envelope");
+   if(q[0]!=magic||q[1]!=2||last==UINT64_MAX||q[2]!=last+1)throw std::runtime_error("invalid native control envelope");
    last=q[2];int status=0;error[0]=0;
    bool reserved=false;for(unsigned i=13;i<16;++i)reserved|=q[i]!=0;
    if(q[3]!=3)for(unsigned i=5;i<13;++i)reserved|=q[i]!=0;
-   if(q[3]!=2&&q[3]!=3)reserved|=q[4]!=0;
+   if(q[3]!=2&&q[3]!=3&&q[3]!=5)reserved|=q[4]!=0;
    if(reserved){status=1;std::snprintf(error,sizeof(error),"unexpected native control fields");}
    else if(q[3]==1){} // info contains no completion or clock claim
    else if(q[3]==2)status=riffine_scheduled_reset(raw,q[4],error,sizeof(error));
+   else if(q[3]==5){if(q[4]>UINT32_MAX){status=1;std::snprintf(error,sizeof(error),"invalid output sample rate");}else status=riffine_scheduled_set_output_rate(raw,uint32_t(q[4]),error,sizeof(error));}
    else if(q[3]==3){
     riffine_schedule schedule{q[4],q[5],q[6],q[7],q[8],q[9],q[10],floating(q[11]),floating(q[12])};
     status=riffine_scheduled_submit(raw,&schedule,error,sizeof(error));

@@ -50,9 +50,12 @@ func serveControlFixture() {
 		if binary.LittleEndian.Uint64(request[24:]) == 2 {
 			generation = binary.LittleEndian.Uint64(request[32:])
 		}
-		words := [16]uint64{controlMagic, 1, binary.LittleEndian.Uint64(request[16:]), 0, 1, 48000, 48000, generation}
+		words := [16]uint64{controlMagic, 2, binary.LittleEndian.Uint64(request[16:]), 0, 1, 48000, 48000, generation, 0, 0, 48000}
 		if mode == "bad_id" {
 			words[2]++
+		}
+		if mode == "bad_rate" {
+			words[10]++
 		}
 		if mode == "bad_dimensions" {
 			words[6]++
@@ -213,7 +216,7 @@ func TestNativeScheduledWorker(t *testing.T) {
 }
 
 func TestControlMalformedHandshakeFencesProcess(t *testing.T) {
-	for _, mode := range []string{"bad_id", "bad_dimensions", "bad_reserved", "bad_status", "bad_error", "short"} {
+	for _, mode := range []string{"bad_id", "bad_dimensions", "bad_rate", "bad_reserved", "bad_status", "bad_error", "short"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Setenv("RIFFINE_DECODER_TEST_PROCESS", "1")
 			t.Setenv("RIFFINE_CONTROL_TEST_MODE", mode)
@@ -395,5 +398,84 @@ func TestControlRejectsOlderHelper(t *testing.T) {
 			worker.Close()
 		}
 		t.Fatal("advertised unsupported persistent control")
+	}
+}
+
+func TestNativeScheduledRateWorker(t *testing.T) {
+	helper := os.Getenv("RIFFINE_AUDIO_HELPER")
+	if helper == "" {
+		t.Skip("set RIFFINE_AUDIO_HELPER for mandatory native CI integration")
+	}
+	reader, info := controlFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	a := Adapter{Executable: helper}
+	for _, rate := range []int{8000, 44100, 192000} {
+		worker, err := a.OpenScheduledWorkerRate(ctx, reader, info, rate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = worker.Reset(ctx, 1); err != nil {
+			worker.Close()
+			t.Fatal(err)
+		}
+		frames := int64(math.Round(8850 * float64(rate) / float64(info.SampleRate) / .75))
+		s := engine.Schedule{Generation: 1, Sequence: 1, StartFrame: 1151, EndFrame: 10001, OutputEnd: frames, Speed: .75, Pitch: 3, EdgeFadeFrames: int64(rate / 200)}
+		if err = worker.Submit(ctx, s); err != nil {
+			worker.Close()
+			t.Fatal(err)
+		}
+		before, err := worker.Info(ctx)
+		if err != nil || before.OutputRate != rate || before.SampleRate != info.SampleRate || before.Pending != 1 {
+			worker.Close()
+			t.Fatal(before, err)
+		}
+		worker.mu.Lock()
+		_, err = worker.exchangeLocked(ctx, [16]uint64{3: 5, 4: 48000})
+		worker.mu.Unlock()
+		if err == nil {
+			worker.Close()
+			t.Fatal("changed negotiated rate after generation")
+		}
+		after, err := worker.Info(ctx)
+		if err != nil || after != before {
+			worker.Close()
+			t.Fatal("rate rejection changed metadata", after, err)
+		}
+		if err = worker.Reset(ctx, 2); err != nil {
+			worker.Close()
+			t.Fatal(err)
+		}
+		reset, err := worker.Info(ctx)
+		if err != nil || reset.OutputRate != rate || reset.Pending != 0 {
+			worker.Close()
+			t.Fatal("reset changed output rate", reset, err)
+		}
+		worker.Close()
+	}
+	for _, rate := range []int{0, 7999, 192001} {
+		if worker, err := a.OpenScheduledWorkerRate(ctx, reader, info, rate); err == nil || worker != nil {
+			if worker != nil {
+				worker.Close()
+			}
+			t.Fatal("accepted invalid output rate")
+		}
+	}
+}
+
+func TestControlRejectsVersionOneHelper(t *testing.T) {
+	t.Setenv("RIFFINE_DECODER_TEST_PROCESS", "1")
+	t.Setenv("RIFFINE_CONTROL_TEST_LEGACY_VERSION", "1")
+	reader, info := controlFixture(t)
+	a := Adapter{Executable: os.Args[0]}
+	if _, err := NewDecoder(context.Background(), a); err != nil {
+		t.Fatal("valid older decoder was rejected", err)
+	}
+	worker, err := a.OpenScheduledWorkerRate(context.Background(), reader, info, 44100)
+	if err == nil || worker != nil {
+		if worker != nil {
+			worker.Close()
+		}
+		t.Fatal("accepted incompatible scheduled-control protocol")
 	}
 }

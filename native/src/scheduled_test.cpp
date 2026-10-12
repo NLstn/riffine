@@ -1,6 +1,7 @@
 #include "riffine_scheduled.h"
 #include "riffine_audio.h"
 #include "riffine_decode.h"
+#include "riffine_rate_selection.h"
 #include "riffine_preview.h"
 #include "encoded_file.h"
 #include <algorithm>
@@ -96,6 +97,36 @@ void rendered(const fs::path &path,uint64_t handle,const riffine_schedule &s){
  check(offset==info.frames,"render ended early");owner.reset();
  check(fs::remove(output),"cannot remove rendered fixture");
 }
+std::vector<float> rateReference(const fs::path &path,const riffine_schedule &s,uint32_t rate){
+ char text[512];riffine_decoder *decoder=nullptr;auto name=path.u8string();ok(riffine_decoder_open_file(name.c_str(),&decoder,error,sizeof(error)));
+ std::unique_ptr<riffine_decoder,decltype(&riffine_decoder_close)> d(decoder,riffine_decoder_close);ok(riffine_decoder_seek(decoder,s.start_frame,error,sizeof(error)));
+ riffine_rate_selection *selection=nullptr;ok(riffine_rate_selection_create(2,48000,rate,s.end_frame-s.start_frame,s.speed,s.semitones,&selection,error,sizeof(error)));
+ std::unique_ptr<riffine_rate_selection,decltype(&riffine_rate_selection_destroy)> p(selection,riffine_rate_selection_destroy);
+ ok(riffine_rate_selection_set_edge_fade_frames(selection,s.edge_fade_frames,error,sizeof(error)));
+ std::vector<float> result;std::array<float,1024> input{};std::array<float,226> output{};uint64_t fed=0;
+ for(;;){uint32_t count=0,need=0;ok(riffine_rate_selection_read(selection,output.data(),113,&count,&need,error,sizeof(error)));result.insert(result.end(),output.begin(),output.begin()+count*2);
+  if(need){auto frames=uint32_t(std::min<uint64_t>(512,s.end_frame-s.start_frame-fed));uint32_t got=0;ok(riffine_decoder_read(decoder,input.data(),frames,&got,error,sizeof(error)));check(got==frames,"rate reference truncated");ok(riffine_rate_selection_push(selection,input.data(),frames,error,sizeof(error)));fed+=frames;}else if(!count)break;
+ }return result;
+}
+void exerciseRates(const fs::path &path){
+ InputResource resource(path);
+ for(uint32_t rate:{8000u,44100u,192000u}){
+  riffine_scheduled_worker *raw=nullptr;ok(riffine_scheduled_open_handle(resource.token(),&raw,error,sizeof(error)));Worker worker(raw,riffine_scheduled_close);
+  uint32_t reported=0;ok(riffine_scheduled_output_rate_get(raw,&reported,error,sizeof(error)));check(reported==48000,"default rate changed");
+  check(riffine_scheduled_set_output_rate(raw,0,error,sizeof(error))!=0,"invalid device rate accepted");ok(riffine_scheduled_set_output_rate(raw,rate,error,sizeof(error)));
+  uint64_t generation=0,sequence=0;std::array<float,226> block{};
+  for(auto profile:{std::pair<double,double>{.25,-12},{.75,3},{2,12}}){
+   ok(riffine_scheduled_reset(raw,++generation,error,sizeof(error)));ok(riffine_scheduled_output_rate_get(raw,&reported,error,sizeof(error)));check(reported==rate,"reset forgot negotiated rate");
+   check(riffine_scheduled_set_output_rate(raw,48000,error,sizeof(error))!=0,"changed active negotiated rate");
+   auto frames=std::max<uint64_t>(1,uint64_t(std::llround(8850.*rate/48000/profile.first)));
+   riffine_schedule s{generation,++sequence,1151,10001,0,frames,std::min<uint64_t>(rate/200,(frames+1)/2),profile.first,profile.second};
+   ok(riffine_scheduled_submit(raw,&s,error,sizeof(error)));auto expected=rateReference(path,s,rate);std::vector<float> actual;riffine_scheduled_block report{};
+   do{read(raw,block.data(),113,&report);check(report.generation==generation&&report.sequence==sequence&&report.output_start==actual.size()/2,"device-rate block identity differs");actual.insert(actual.end(),block.begin(),block.begin()+report.frames*2);}while(!report.generated_complete);
+   check(actual==expected&&actual.size()==frames*2,"scheduled device-rate PCM differs from shared stage");
+  }
+  check(resource.position()==17,"device-rate worker changed caller cursor");
+ }
+}
 void exercise(const fs::path &path,bool borrowed=false){
  InputResource resource(path);
  riffine_scheduled_worker *raw=nullptr;auto name=path.u8string();
@@ -156,8 +187,8 @@ void exercise(const fs::path &path,bool borrowed=false){
 int main(){
  auto root=fs::temp_directory_path()/fs::u8path("riffine-scheduled-音楽-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
  try{
-  check(fs::create_directory(root),"cannot create fixture directory");auto path=root/fs::u8path("ギター.wav");wav(path);exercise(path);exercise(path,true);
-  for(const char *extension:{"flac","mp3"}){path=root/fs::u8path(std::string("ギター.")+extension);fs::copy_file(fs::path(RIFFINE_DECODE_FIXTURES)/(std::string("generated-stereo.")+extension),path);exercise(path);exercise(path,true);}
+  check(fs::create_directory(root),"cannot create fixture directory");auto path=root/fs::u8path("ギター.wav");wav(path);exercise(path);exercise(path,true);exerciseRates(path);
+  for(const char *extension:{"flac","mp3"}){path=root/fs::u8path(std::string("ギター.")+extension);fs::copy_file(fs::path(RIFFINE_DECODE_FIXTURES)/(std::string("generated-stereo.")+extension),path);exercise(path);exercise(path,true);exerciseRates(path);}
   fs::remove_all(root);std::cout<<"bounded WAV/FLAC/MP3 scheduled worker: 2 cursors, exact kernel parity, 100 resets; no device/presentation evidence\n";return 0;
  }catch(const std::exception &e){std::cerr<<e.what()<<"\n";fs::remove_all(root);return 1;}
 }
