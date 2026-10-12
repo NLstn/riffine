@@ -19,7 +19,7 @@ self.onmessage = async event => {
   switch (request.type) {
   case 'create': {
    if (selection) throw new Error('Close the previous selection first.');
-   selection = new Selection(module, request.channels, request.sampleRate, request.sourceFrames, request.speed, request.pitch, request.edgeFadeFrames);
+   selection = new Selection(module, request.channels, request.sampleRate, request.sourceFrames, request.speed, request.pitch, request.edgeFadeFrames, request.outputRate);
    result = selection.info();
    break;
   }

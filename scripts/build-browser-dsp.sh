@@ -15,6 +15,7 @@ emscripten_source="$(dirname "$emcc_path")"
 mkdir -p web/public/practice/licenses
 cp build/browser-dsp/_deps/signalsmith-stretch-src/LICENSE.txt web/public/practice/licenses/signalsmith-stretch.txt
 cp build/browser-dsp/_deps/signalsmith-linear-src/LICENSE.txt web/public/practice/licenses/signalsmith-linear.txt
+cp build/browser-dsp/miniaudio-LICENSE web/public/practice/licenses/miniaudio.txt
 cp "$emscripten_source/LICENSE" web/public/practice/licenses/emscripten.txt
 cp "$emscripten_source/system/lib/libc/musl/COPYRIGHT" web/public/practice/licenses/musl.txt
 cp "$emscripten_source/system/lib/libcxx/LICENSE.TXT" web/public/practice/licenses/libcxx.txt

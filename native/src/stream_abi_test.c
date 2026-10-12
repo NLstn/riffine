@@ -1,6 +1,7 @@
 /* Compile and execute as C: opaque API must not require C++ headers/types. */
 #include "riffine_stream.h"
 #include "riffine_audio.h"
+#include "riffine_rate_selection.h"
 #include "riffine_decode.h"
 #include "riffine_scheduled.h"
 #include "riffine_preview.h"
@@ -31,6 +32,9 @@ int main(void) {
   if(riffine_preview_open_handle(UINT64_MAX,0,1,1,0,&source,error,sizeof(error))!=1 || source) return 1;
   riffine_preview_report preview_report;
   if(riffine_preview_handle(UINT64_MAX,0,1,1,0,1,&preview_report,error,sizeof(error))!=1 || preview_report.output_frames) return 1;
+  riffine_rate_selection *rate_selection=0;
+  if(riffine_rate_selection_create(1,48000,0,1,1,0,&rate_selection,error,sizeof(error))!=1 || rate_selection) return 1;
+  riffine_rate_selection_destroy(0);
   riffine_selection *selection=0;
   float input=.2f,output=0;
   uint32_t count=0,needs_input=0;
