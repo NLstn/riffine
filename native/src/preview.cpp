@@ -64,14 +64,14 @@ struct Producer {
   ~Producer() {stop.store(true);if(thread.joinable()) thread.join();}
 };
 }
-int riffine_preview(const char *path,int64_t start,int64_t end,double speed,double pitch,int silent,
+static int previewRun(const char *path,uint64_t handle,bool borrowed,int64_t start,int64_t end,double speed,double pitch,int silent,
   riffine_preview_report *report,char *error,size_t size) {
   if(error && size) error[0]=0;
   if(report) *report={};
   try {
     require(report && (silent==0 || silent==1),"report and explicit output mode are required");
     auto began=Clock::now();char text[512];riffine_preview_source *raw=nullptr;
-    sourceResult(riffine_preview_open(path,start,end,speed,pitch,&raw,text,sizeof(text)),text);
+    sourceResult(borrowed ? riffine_preview_open_handle(handle,start,end,speed,pitch,&raw,text,sizeof(text)) : riffine_preview_open(path,start,end,speed,pitch,&raw,text,sizeof(text)),text);
     std::unique_ptr<riffine_preview_source,decltype(&riffine_preview_close)> source(raw,riffine_preview_close);
     riffine_preview_info info{};sourceResult(riffine_preview_info_get(source.get(),&info,text,sizeof(text)),text);
     riffine::PreviewQueue queue(32768,info.channels,info.output_frames);CallbackState state(queue);
@@ -126,4 +126,11 @@ int riffine_preview(const char *path,int64_t start,int64_t end,double speed,doub
     return 0;
   } catch(const std::exception &e) {if(error && size) std::snprintf(error,size,"%s",e.what());return 1;}
   catch(...) {if(error && size) std::snprintf(error,size,"unexpected native preview error");return 1;}
+}
+
+int riffine_preview(const char *path,int64_t start,int64_t end,double speed,double pitch,int silent,riffine_preview_report *report,char *error,size_t size){
+ return previewRun(path,0,false,start,end,speed,pitch,silent,report,error,size);
+}
+int riffine_preview_handle(uint64_t handle,int64_t start,int64_t end,double speed,double pitch,int silent,riffine_preview_report *report,char *error,size_t size){
+ return previewRun(nullptr,handle,true,start,end,speed,pitch,silent,report,error,size);
 }

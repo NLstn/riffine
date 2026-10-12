@@ -21,8 +21,9 @@ import (
 // Decoder uses Go's bounded WAV port and the tested native worker for compressed
 // local files. It never moves realtime PCM through the Go/UI command boundary.
 type Decoder struct {
-	adapter Adapter
-	formats []string
+	adapter         Adapter
+	formats         []string
+	borrowedPreview bool
 }
 
 func NewDecoder(ctx context.Context, adapter Adapter) (Decoder, error) {
@@ -35,6 +36,7 @@ func NewDecoder(ctx context.Context, adapter Adapter) (Decoder, error) {
 		ABI             int      `json:"abi"`
 		Formats         []string `json:"formats"`
 		BorrowedSources bool     `json:"borrowedSources"`
+		BorrowedPreview bool     `json:"borrowedPreview"`
 	}
 	if err = json.Unmarshal(data, &report); err != nil {
 		return result, err
@@ -42,7 +44,7 @@ func NewDecoder(ctx context.Context, adapter Adapter) (Decoder, error) {
 	if report.ABI != 1 || !report.BorrowedSources || len(report.Formats) != 3 || report.Formats[0] != "wav-pcm" || report.Formats[1] != "flac" || report.Formats[2] != "mp3" {
 		return result, errors.New("native decoder protocol/capabilities are unsupported; rebuild the helper with borrowed-source support")
 	}
-	return Decoder{adapter: adapter, formats: append([]string(nil), report.Formats...)}, nil
+	return Decoder{adapter: adapter, formats: append([]string(nil), report.Formats...), borrowedPreview: report.BorrowedPreview}, nil
 }
 func (d Decoder) Formats() []string { return append([]string(nil), d.formats...) }
 func (a Adapter) capture(ctx context.Context, args ...string) ([]byte, error) {

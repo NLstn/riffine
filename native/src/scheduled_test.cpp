@@ -50,8 +50,9 @@ riffine_schedule schedule(uint64_t generation,uint64_t sequence,uint64_t start,u
  auto count=std::max<uint64_t>(1,uint64_t(std::llround(double(end-start)/speed)));
  return {generation,sequence,start,end,output,output+count,std::min<uint64_t>(240,(count+1)/2),speed,pitch};
 }
-std::vector<float> reference(const fs::path &path,const riffine_schedule &s){
- riffine_preview_source *raw=nullptr;auto name=path.u8string();ok(riffine_preview_open(name.c_str(),int64_t(s.start_frame),int64_t(s.end_frame),s.speed,s.semitones,&raw,error,sizeof(error)));
+std::vector<float> reference(const fs::path &path,const riffine_schedule &s,uint64_t handle=UINT64_MAX){
+ riffine_preview_source *raw=nullptr;auto name=path.u8string();if(handle==UINT64_MAX)ok(riffine_preview_open(name.c_str(),int64_t(s.start_frame),int64_t(s.end_frame),s.speed,s.semitones,&raw,error,sizeof(error)));
+ else ok(riffine_preview_open_handle(handle,int64_t(s.start_frame),int64_t(s.end_frame),s.speed,s.semitones,&raw,error,sizeof(error)));
  std::unique_ptr<riffine_preview_source,decltype(&riffine_preview_close)> owner(raw,riffine_preview_close);
  std::vector<float> result,block(8192*2);uint32_t count;
  do {ok(riffine_preview_read(raw,block.data(),511,&count,error,sizeof(error)));result.insert(result.end(),block.begin(),block.begin()+size_t(count)*2);}while(count);
@@ -87,7 +88,7 @@ void exercise(const fs::path &path,bool borrowed=false){
  std::vector<float> block(8192*2);riffine_scheduled_block report{};
  check(riffine_scheduled_read(raw,block.data(),8193,&report,error,sizeof(error))!=0&&!report.frames,"accepted oversized read");
  for(const auto &s:{first,second}){
-  auto expected=reference(path,s);std::vector<float> actual;uint64_t output=s.output_start;
+  auto expected=reference(path,s);check(reference(path,s,resource.token())==expected,"borrowed preview differs from path kernel");check(resource.position()==17,"borrowed preview changed caller cursor");std::vector<float> actual;uint64_t output=s.output_start;
   do {
    read(raw,block.data(),113,&report);
    check(report.generation==s.generation&&report.sequence==s.sequence&&report.output_start==output&&report.frames>0&&report.frames<=113,"incorrect schedule block identity/coordinates");

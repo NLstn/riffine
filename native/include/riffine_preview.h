@@ -19,6 +19,10 @@ typedef struct riffine_preview_info {
 int riffine_preview_open(const char *input, int64_t start, int64_t end,
   double speed, double semitones, riffine_preview_source **source,
   char *error, size_t error_size);
+/* Borrows a read-only encoded handle. Owns only its retained decoder cursor;
+ * never seeks/closes the caller handle. Same bounds and worker rules as open. */
+int riffine_preview_open_handle(uint64_t handle,int64_t start,int64_t end,
+  double speed,double semitones,riffine_preview_source **source,char *error,size_t error_size);
 int riffine_preview_info_get(const riffine_preview_source *source, riffine_preview_info *info,
   char *error, size_t error_size);
 /* Writes at most capacity (1..8192) frames. Zero produced means EOF. Errors after
@@ -40,6 +44,9 @@ typedef struct riffine_preview_report {
 int riffine_preview(const char *input, int64_t start, int64_t end,
   double speed, double semitones, int silent, riffine_preview_report *report,
   char *error, size_t error_size);
+/* Same one-selection device preview, using the retained original resource. */
+int riffine_preview_handle(uint64_t handle,int64_t start,int64_t end,
+  double speed,double semitones,int silent,riffine_preview_report *report,char *error,size_t error_size);
 #ifdef __cplusplus
 }
 #endif

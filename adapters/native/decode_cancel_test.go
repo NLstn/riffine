@@ -20,8 +20,10 @@ func TestMain(m *testing.M) {
 		case "formats":
 			if os.Getenv("RIFFINE_DECODER_TEST_LEGACY_SOURCE") == "1" {
 				fmt.Print(`{"abi":1,"formats":["wav-pcm","flac","mp3"]}`)
-			} else {
+			} else if os.Getenv("RIFFINE_DECODER_TEST_LEGACY_PREVIEW") == "1" {
 				fmt.Print(`{"abi":1,"formats":["wav-pcm","flac","mp3"],"borrowedSources":true}`)
+			} else {
+				fmt.Print(`{"abi":1,"formats":["wav-pcm","flac","mp3"],"borrowedSources":true,"borrowedPreview":true}`)
 			}
 		case "decoder-info-handle":
 			frames := 48000
