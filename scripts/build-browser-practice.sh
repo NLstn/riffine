@@ -12,3 +12,6 @@ browser_demo_dir="$(mktemp -d build/browser-practice.XXXXXX)"
 trap 'rm -rf "$browser_demo_dir"' EXIT HUP INT TERM
 go run ./cmd/riffine tone --out "$browser_demo_dir/demo.wav" --seconds 3
 cp "$browser_demo_dir/demo.wav" web/public/practice/demo.wav
+
+# Original generated compressed fixture exercises the same import path as library MP3s.
+cp native/testdata/generated-stereo.mp3 web/public/practice/demo.mp3

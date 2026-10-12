@@ -11,7 +11,6 @@ import (
 
 	"github.com/NLstn/riffine/adapters/binding"
 	"github.com/NLstn/riffine/adapters/browser"
-	"github.com/NLstn/riffine/core/audio"
 	"github.com/NLstn/riffine/core/practice"
 	"github.com/NLstn/riffine/core/project"
 )
@@ -59,7 +58,7 @@ func main() {
 					fail(id, err)
 					return
 				}
-				service := practice.Service{Resources: host, Store: host, Decoder: audio.WAVDecoder{}}
+				service := practice.Service{Resources: host, Store: host, Decoder: browser.Decoder{}}
 				if browser.PreviewAvailable() {
 					service.SourcePreviewer = browser.Previewer{}
 				}
