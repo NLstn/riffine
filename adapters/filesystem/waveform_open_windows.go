@@ -7,9 +7,10 @@ import (
 	"syscall"
 )
 
-// Generated caches may be replaced while a reader holds the old complete file.
-// Windows requires explicit delete sharing for this immutable-reader behavior.
-func openPeakCache(path string) (*os.File, error) {
+// A reader retains its original file across path replacement or relocation.
+// Windows requires delete sharing; access remains read-only. Caches use the same
+// resource open so replacing a cache leaves its old complete reader usable.
+func openResourceFile(path string) (*os.File, error) {
 	name, err := windowsDocumentPath(path)
 	if err != nil {
 		return nil, err
@@ -20,3 +21,5 @@ func openPeakCache(path string) (*os.File, error) {
 	}
 	return os.NewFile(uintptr(handle), path), nil
 }
+
+func openPeakCache(path string) (*os.File, error) { return openResourceFile(path) }

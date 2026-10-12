@@ -4,4 +4,6 @@ package filesystem
 
 import "os"
 
-func openPeakCache(path string) (*os.File, error) { return os.Open(path) }
+func openResourceFile(path string) (*os.File, error) { return os.Open(path) }
+
+func openPeakCache(path string) (*os.File, error) { return openResourceFile(path) }

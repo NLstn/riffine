@@ -1,6 +1,7 @@
 #include "riffine_decode.h"
 #define NOMINMAX
 #include "miniaudio.h"
+#include "encoded_file.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -11,6 +12,7 @@
 #include <string>
 
 struct riffine_decoder {
+ std::unique_ptr<riffine::EncodedFile> resource;
  ma_decoder decoder{};
  riffine_decoder_info info{};
  bool opened=false,failed=false;
@@ -47,9 +49,9 @@ struct File {
 };
 unsigned u16(const unsigned char *b){return unsigned(b[0])|(unsigned(b[1])<<8);}
 uint32_t u32(const unsigned char *b){return uint32_t(b[0])|(uint32_t(b[1])<<8)|(uint32_t(b[2])<<16)|(uint32_t(b[3])<<24);}
-uint32_t precision(const char *path,uint32_t encoding){
+template<class Reader>uint32_t precision(Reader &file,uint32_t encoding){
  if(encoding==3)return 0;
- File file(path);unsigned char h[26]{};
+ unsigned char h[26]{};
  if(encoding==2){file.read(h,sizeof(h));if(std::string(reinterpret_cast<char*>(h),4)!="fLaC"|| (h[4]&127)!=0 || ((uint32_t(h[5])<<16)|(uint32_t(h[6])<<8)|h[7])!=34)return 0;uint64_t packed=0;for(unsigned i=18;i<26;++i)packed=(packed<<8)|h[i];return uint32_t(((packed>>36)&31)+1);}
  file.read(h,12);require(std::string(reinterpret_cast<char*>(h),4)=="RIFF"&&std::string(reinterpret_cast<char*>(h+8),4)=="WAVE","unsupported WAV container");
  uint64_t end=uint64_t(u32(h+4))+8,pos=12;
@@ -58,6 +60,25 @@ uint32_t precision(const char *path,uint32_t encoding){
  pos+=8+uint64_t(n)+(n&1);
  }
  throw std::runtime_error("missing WAV format");
+}
+struct ResourceHeader {
+ riffine::EncodedFile &resource;uint64_t position=0;
+ void seek(uint64_t pos){position=pos;}
+ void read(void *output,size_t count){require(resource.readAt(output,count,position)==count,"truncated audio header");position+=count;}
+};
+ma_result resourceRead(ma_decoder *decoder,void *output,size_t bytes,size_t *read){
+ if(read)*read=0;
+ try{auto count=static_cast<riffine::EncodedFile *>(decoder->pUserData)->read(output,bytes);if(read)*read=count;return count||!bytes?MA_SUCCESS:MA_AT_END;}
+ catch(...){return MA_ERROR;}
+}
+ma_result resourceSeek(ma_decoder *decoder,ma_int64 offset,ma_seek_origin origin){
+ return static_cast<riffine::EncodedFile *>(decoder->pUserData)->seek(offset,unsigned(origin))?MA_SUCCESS:MA_BAD_SEEK;
+}
+void finishOpen(riffine_decoder *s){
+ require(s->opened,"unsupported or malformed audio (tested codecs: WAV PCM, FLAC, MP3)");
+ s->info.channels=s->decoder.outputChannels;s->info.sample_rate=s->decoder.outputSampleRate;
+ require(s->info.channels>=1&&s->info.channels<=2&&s->info.sample_rate>=8000&&s->info.sample_rate<=192000,"unsupported source rate or channels");
+ ma_uint64 length=0;require(ma_decoder_get_length_in_pcm_frames(&s->decoder,&length)==MA_SUCCESS&&length>0&&length<=(uint64_t(1)<<48),"invalid or unknown decoded source length");s->info.frames=length;
 }
 void readExact(riffine_decoder *s,float *out,uint32_t frames){
  ma_uint64 read=0;auto result=ma_decoder_read_pcm_frames(&s->decoder,out,frames,&read);
@@ -77,11 +98,23 @@ int riffine_decoder_open_file(const char *path,riffine_decoder **decoder,char *e
  auto result=ma_decoder_init_file(path,&config,&s->decoder);
 #endif
  if(result==MA_SUCCESS){s->opened=true;s->info.encoding=i+1;break;}}
- require(s->opened,"unsupported or malformed audio (tested codecs: WAV PCM, FLAC, MP3)");
- s->info.channels=s->decoder.outputChannels;s->info.sample_rate=s->decoder.outputSampleRate;
- require(s->info.channels>=1&&s->info.channels<=2&&s->info.sample_rate>=8000&&s->info.sample_rate<=192000,"unsupported source rate or channels");
- ma_uint64 length=0;require(ma_decoder_get_length_in_pcm_frames(&s->decoder,&length)==MA_SUCCESS&&length>0&&length<=(uint64_t(1)<<48),"invalid or unknown decoded source length");s->info.frames=length;
- s->info.source_bits=precision(path,s->info.encoding);require(ma_decoder_seek_to_pcm_frame(&s->decoder,0)==MA_SUCCESS,"cannot reset source decoder");*decoder=s.release();});
+ finishOpen(s.get());
+ if(s->info.encoding!=3){File header(path);s->info.source_bits=precision(header,s->info.encoding);}require(ma_decoder_seek_to_pcm_frame(&s->decoder,0)==MA_SUCCESS,"cannot reset source decoder");*decoder=s.release();});
+}
+int riffine_decoder_open_handle(uint64_t handle,riffine_decoder **decoder,char *error,size_t size){
+ if(decoder)*decoder=nullptr;
+ return boundary(error,size,[&]{
+  require(decoder,"decoder result required");auto s=std::make_unique<riffine_decoder>();s->resource=std::make_unique<riffine::EncodedFile>(handle);
+  const ma_encoding_format formats[]={ma_encoding_format_wav,ma_encoding_format_flac,ma_encoding_format_mp3};
+  for(unsigned i=0;i<3;++i){
+   require(s->resource->seek(0,0),"cannot reset resource cursor");
+   auto config=ma_decoder_config_init(ma_format_f32,0,0);config.encodingFormat=formats[i];
+   auto result=ma_decoder_init(resourceRead,resourceSeek,s->resource.get(),&config,&s->decoder);
+   if(result==MA_SUCCESS){s->opened=true;s->info.encoding=i+1;break;}
+  }
+  finishOpen(s.get());ResourceHeader header{*s->resource};s->info.source_bits=precision(header,s->info.encoding);
+  require(ma_decoder_seek_to_pcm_frame(&s->decoder,0)==MA_SUCCESS,"cannot reset source decoder");*decoder=s.release();
+ });
 }
 int riffine_decoder_info_get(const riffine_decoder *s,riffine_decoder_info *info,char *error,size_t size){return boundary(error,size,[&]{require(s&&info,"decoder and info required");*info=s->info;});}
 int riffine_decoder_seek(riffine_decoder *s,uint64_t frame,char *error,size_t size){return boundary(error,size,[&]{require(s&&!s->failed&&frame<=s->info.frames,"invalid decoder seek");s->failed=true;

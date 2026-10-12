@@ -188,3 +188,32 @@ func TestToneCollisionAndInvalidInput(t *testing.T) {
 		t.Fatal("published invalid tone")
 	}
 }
+
+func TestBorrowedResourceRetainsOriginalAcrossReplacement(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "original.bin")
+	if err := os.WriteFile(path, []byte("original"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := (Host{}).Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	borrowed, ok := BorrowedFile(r)
+	if !ok {
+		t.Fatal("did not lend owned file")
+	}
+	if err = os.Rename(path, path+".moved"); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(path, []byte("replaced"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	data := make([]byte, 8)
+	if _, err = borrowed.ReadAt(data, 0); err != nil || string(data) != "original" {
+		t.Fatal("borrowed resource followed replacement", string(data), err)
+	}
+	if _, ok = BorrowedFile(nil); ok {
+		t.Fatal("lent a nonexistent resource")
+	}
+}

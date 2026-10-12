@@ -49,6 +49,19 @@ int riffine_scheduled_open(const char *path,riffine_scheduled_worker **result,ch
   *result=worker.release();
  });
 }
+int riffine_scheduled_open_handle(uint64_t handle,riffine_scheduled_worker **result,char *error,size_t size){
+ if(result)*result=nullptr;
+ return boundary(error,size,[&]{
+  require(result,"worker result required");auto worker=std::make_unique<riffine_scheduled_worker>();char text[512];
+  for(auto &slot:worker->slots){
+   ok(riffine_decoder_open_handle(handle,&slot.decoder,text,sizeof(text)),text);
+   riffine_decoder_info info{};ok(riffine_decoder_info_get(slot.decoder,&info,text,sizeof(text)),text);
+   if(!worker->info.channels){worker->info.channels=info.channels;worker->info.sample_rate=info.sample_rate;worker->info.source_frames=info.frames;}
+   require(info.channels==worker->info.channels&&info.sample_rate==worker->info.sample_rate&&info.frames==worker->info.source_frames,"source changed while opening borrowed cursors");
+  }
+  *result=worker.release();
+ });
+}
 int riffine_scheduled_info_get(const riffine_scheduled_worker *w,riffine_scheduled_info *result,char *error,size_t size){
  return boundary(error,size,[&]{require(w&&result,"worker and info required");*result=w->info;});
 }

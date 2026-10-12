@@ -1,5 +1,6 @@
 #include "riffine_scheduled.h"
 #include "riffine_preview.h"
+#include "encoded_file.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -56,8 +57,26 @@ std::vector<float> reference(const fs::path &path,const riffine_schedule &s){
  do {ok(riffine_preview_read(raw,block.data(),511,&count,error,sizeof(error)));result.insert(result.end(),block.begin(),block.begin()+size_t(count)*2);}while(count);
  return result;
 }
-void exercise(const fs::path &path){
- riffine_scheduled_worker *raw=nullptr;auto name=path.u8string();ok(riffine_scheduled_open(name.c_str(),&raw,error,sizeof(error)));Worker worker(raw,riffine_scheduled_close);
+struct InputResource {
+#ifdef _WIN32
+ HANDLE handle=INVALID_HANDLE_VALUE;
+ explicit InputResource(const fs::path &path){handle=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);check(handle!=INVALID_HANDLE_VALUE,"cannot open caller resource");LARGE_INTEGER position{};position.QuadPart=17;check(SetFilePointerEx(handle,position,nullptr,FILE_BEGIN)!=0,"caller seek failed");}
+ ~InputResource(){CloseHandle(handle);}
+ uint64_t token() const{return uint64_t(reinterpret_cast<uintptr_t>(handle));}
+ uint64_t position() const{LARGE_INTEGER zero{},position{};check(SetFilePointerEx(handle,zero,&position,FILE_CURRENT)!=0,"caller tell failed");return uint64_t(position.QuadPart);}
+#else
+ int handle=-1;
+ explicit InputResource(const fs::path &path){handle=::open(path.c_str(),O_RDONLY);check(handle>=0,"cannot open caller resource");check(lseek(handle,17,SEEK_SET)==17,"caller seek failed");}
+ ~InputResource(){::close(handle);}
+ uint64_t token() const{return uint64_t(handle);}
+ uint64_t position() const{auto position=lseek(handle,0,SEEK_CUR);check(position>=0,"caller tell failed");return uint64_t(position);}
+#endif
+};
+void exercise(const fs::path &path,bool borrowed=false){
+ InputResource resource(path);
+ riffine_scheduled_worker *raw=nullptr;auto name=path.u8string();
+ if(borrowed)ok(riffine_scheduled_open_handle(resource.token(),&raw,error,sizeof(error)));else ok(riffine_scheduled_open(name.c_str(),&raw,error,sizeof(error)));
+ Worker worker(raw,riffine_scheduled_close);
  riffine_scheduled_info info{};ok(riffine_scheduled_info_get(raw,&info,error,sizeof(error)));check(info.channels==2&&info.sample_rate==48000&&info.source_frames==48000&&!info.pending&&!info.generation,"incorrect source metadata");
  auto first=schedule(1,1,12000,36000,0,.75,3),second=schedule(1,2,1151,10001,first.output_end,2,-12);
  check(riffine_scheduled_submit(raw,&first,error,sizeof(error))!=0,"accepted schedule before reset");
@@ -106,13 +125,14 @@ void exercise(const fs::path &path){
  // or schedule can escape into the replacement generation.
  ok(riffine_scheduled_reset(raw,106,error,sizeof(error)));first=schedule(106,107,12000,36000,0,.25,-12);ok(riffine_scheduled_submit(raw,&first,error,sizeof(error)));read(raw,block.data(),7,&report);
  ok(riffine_scheduled_reset(raw,107,error,sizeof(error)));third=schedule(107,108,12000,12001,0,1,0);ok(riffine_scheduled_submit(raw,&third,error,sizeof(error)));read(raw,block.data(),128,&report);check(report.generation==107&&report.sequence==108&&report.frames==1&&report.generated_complete,"reset leaked old-generation PCM");
+ worker.reset();check(resource.position()==17,"worker closed caller handle or changed its cursor");
 }
 }
 int main(){
  auto root=fs::temp_directory_path()/fs::u8path("riffine-scheduled-音楽-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
  try{
-  check(fs::create_directory(root),"cannot create fixture directory");auto path=root/fs::u8path("ギター.wav");wav(path);exercise(path);
-  for(const char *extension:{"flac","mp3"}){path=root/fs::u8path(std::string("ギター.")+extension);fs::copy_file(fs::path(RIFFINE_DECODE_FIXTURES)/(std::string("generated-stereo.")+extension),path);exercise(path);}
+  check(fs::create_directory(root),"cannot create fixture directory");auto path=root/fs::u8path("ギター.wav");wav(path);exercise(path);exercise(path,true);
+  for(const char *extension:{"flac","mp3"}){path=root/fs::u8path(std::string("ギター.")+extension);fs::copy_file(fs::path(RIFFINE_DECODE_FIXTURES)/(std::string("generated-stereo.")+extension),path);exercise(path);exercise(path,true);}
   fs::remove_all(root);std::cout<<"bounded WAV/FLAC/MP3 scheduled worker: 2 cursors, exact kernel parity, 100 resets; no device/presentation evidence\n";return 0;
  }catch(const std::exception &e){std::cerr<<e.what()<<"\n";fs::remove_all(root);return 1;}
 }
