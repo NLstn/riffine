@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { LiveOutputHost } from '../web/public/practice/live-output-host.mjs';
 const planMode=process.env.RIFFINE_LIVE_PLAN === '1';
+const actionMode=process.env.RIFFINE_LIVE_ACTIONS === '1';
 const speed=Number(process.env.RIFFINE_LIVE_SPEED ?? '.75');
 const pitch=Number(process.env.RIFFINE_LIVE_PITCH ?? '3');
 let Processor;
@@ -71,7 +72,36 @@ try {
  await ready;
  let response=requireResponse(await call({type:'import',source:'source',document:'project'}));
  assert.equal(response.snapshot.capabilities.liveTransport,false);
- if (planMode) {
+ if (actionMode) {
+  await command({type:'set_annotations',annotations:{notes:'Keep notes',regions:[{id:'one',label:'One',start:.25,end:.75},{id:'two',label:'Two',start:.1,end:.2}]}});
+  response=requireResponse(await call({type:'attach_transport'}));sequence=response.snapshot.sequence;
+  let snapshot=await command({type:'speed_up'});assert.equal(snapshot.project.settings.speed,1.05);
+  snapshot=await command({type:'speed_down'});assert.equal(snapshot.project.settings.speed,1);
+  await command({type:'play'});pumping=true;
+  const deadline=performance.now()+10000;
+  do {snapshot=requireResponse(await call({type:'poll_transport'})).snapshot;assert(performance.now()<deadline);await delay(10);} while(snapshot.transport.sourceFrame<12000);
+  snapshot=await command({type:'pause'});const a=snapshot.transport.sourceFrame;
+  snapshot=await command({type:'set_a'});assert.equal(snapshot.project.settings.loop.start,a/48000);assert.equal(snapshot.transport.config.loopStart,a);
+  await command({type:'seek',position:36000});
+  snapshot=await command({type:'set_b'});assert.equal(snapshot.project.settings.loop.end,.75);assert.equal(snapshot.transport.config.loopEnd,36000);
+  await command({type:'seek',position:30000});
+  snapshot=await command({type:'rewind_phrase'});assert.equal(snapshot.transport.sourceFrame,a);assert.equal(snapshot.state,'paused');
+  snapshot=await command({type:'seek_forward'});assert.equal(snapshot.transport.sourceFrame,35999);
+  snapshot=await command({type:'seek_backward'});assert.equal(snapshot.transport.sourceFrame,a);
+  snapshot=await command({type:'next_region'});assert.equal(snapshot.transport.config.loopStart,12000);assert.equal(snapshot.state,'stopped');
+  await command({type:'play'});
+  snapshot=await command({type:'next_region'});assert.equal(snapshot.transport.config.loopStart,4800);assert.equal(snapshot.state,'playing');
+  snapshot=await command({type:'next_region'});assert.equal(snapshot.transport.config.loopStart,12000);
+  const definition={id:'ladder',label:'Ladder',regionId:'one',ladder:{startSpeed:.6,targetSpeed:1,incrementPoints:5,loopsPerStep:4,endBehavior:'stop'}};
+  await command({type:'set_practice_plans',practicePlans:[definition]});
+  await command({type:'select_practice_plan',planId:'ladder'});
+  snapshot=await command({type:'speed_up'});assert.equal(snapshot.transport.config.speed,.65);assert.equal(snapshot.transport.plan.state,'paused');
+  snapshot=await command({type:'practice_reset'});assert.equal(snapshot.state,'stopped');assert.equal(snapshot.activePracticePlan,undefined);assert.equal(snapshot.transport.plan,undefined);assert.equal(snapshot.transport.sourceFrame,0);
+  const saved=JSON.parse(requireResponse(await call({type:'export'})).document);
+  assert.equal(saved.settings.speed,1);assert.equal(saved.settings.pitch,0);assert.equal(saved.settings.loop.enabled,false);assert.equal(saved.annotations.notes,'Keep notes');assert.deepEqual(saved.practicePlans,[definition]);
+  response=requireResponse(await call({type:'detach_transport'}));sequence=response.snapshot.sequence;assert.equal(context.closes,1);
+  console.log(JSON.stringify({actualGoLiveFactory:true,actualCPPWASM:true,acknowledgedACapture:true,BCaptureSourceFrame:36000,rewindPreservesPause:true,boundedOneSecondSeeks:true,regionOrderAndPlayingState:true,fivePointSpeedSteps:true,stepPausesLadder:true,resetPreservesDefinitions:true,deviceClockIsSynthetic:true},null,2));
+ } else if (planMode) {
   await command({type:'set_annotations',annotations:{regions:[{id:'phrase',label:'Phrase',start:.25,end:.75}]}});
   const definition={id:'ladder',label:'60–100',regionId:'phrase',ladder:{startSpeed:.6,targetSpeed:1,incrementPoints:5,loopsPerStep:4,endBehavior:'stop'}};
   await command({type:'set_practice_plans',practicePlans:[definition]});

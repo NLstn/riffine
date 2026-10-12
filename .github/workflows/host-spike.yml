@@ -121,6 +121,7 @@ jobs:
           go run ./cmd/riffine tone --out build/browser-conformance.wav --seconds 1
           node scripts/check-browser-preview.mjs > build/browser-dsp/preview.json
           node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-binding.json
+          RIFFINE_LIVE_ACTIONS=1 node scripts/check-browser-live-binding.mjs > build/browser-dsp/practice-actions.json
           RIFFINE_LIVE_PLAN=1 node scripts/check-browser-live-binding.mjs > build/browser-dsp/saved-plan.json
           RIFFINE_LIVE_SPEED=1 RIFFINE_LIVE_PITCH=0 node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-binding-normal.json
           RIFFINE_LIVE_SPEED=.25 RIFFINE_LIVE_PITCH=-12 node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-binding-min.json
@@ -135,6 +136,7 @@ jobs:
             build/browser-dsp/metrics.json
             build/browser-dsp/preview.json
             build/browser-dsp/schedules.json
+            build/browser-dsp/practice-actions.json
             build/browser-dsp/saved-plan.json
             build/browser-dsp/live-binding.json
             build/browser-dsp/live-binding-normal.json

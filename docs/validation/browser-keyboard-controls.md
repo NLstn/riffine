@@ -56,3 +56,10 @@ selection, disconnect/reconnect, repeat behavior and instrument-playing usabilit
 still need target-device evidence. MIDI/HID discovery, global opt-in controls,
 speed-step/A/B/next-region/reset actions, complete screen-reader verification and
 the desktop production wiring remain outstanding issue work.
+
+## Extended shared actions
+
+The remaining foreground rewind/seek/A/B/next-region/speed-step/reset commands
+are now implemented in the core and bound to visible controls and remappable
+keys. See [practice-actions](practice-actions.md) for defaults, non-overwriting
+preference migration, reset semantics and actual browser/integration evidence.

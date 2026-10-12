@@ -184,6 +184,12 @@ func (s *Session) snapshot() Snapshot {
 		Capabilities: Capabilities{Formats: append([]string{}, s.service.Decoder.Formats()...), OfflineRender: s.service.Renderer != nil, StreamPreview: s.service.Previewer != nil || s.service.SourcePreviewer != nil}}
 	if s.live != nil {
 		transport := s.live.transport.Snapshot()
+		if s.live.dirty {
+			transport.State = "error"
+			if transport.Error == "" {
+				transport.Error = "transport requires recovery"
+			}
+		}
 		snapshot.Transport = &transport
 		snapshot.State = transport.State
 		snapshot.Capabilities.LiveTransport = true
@@ -234,6 +240,26 @@ func (s *Session) Dispatch(ctx context.Context, c Command) (Snapshot, error) {
 		return reject(OutOfOrder, "command sequence must be the next successful sequence")
 	}
 	p := s.p
+	if practiceAction(c.Type) {
+		if c.PracticePlans != nil || c.Annotations != nil || c.Loop != nil || c.Speed != nil || c.Pitch != nil || c.Position != nil || c.PlanID != nil {
+			return reject(InvalidCommand, "practice action accepts no extra fields")
+		}
+		if s.live == nil {
+			return reject(UnsupportedCapability, "live transport is unavailable")
+		}
+		updated, err := s.dispatchPracticeAction(ctx, c.Type, p)
+		if err != nil {
+			return s.snapshot(), err
+		}
+		s.p, s.sequence = updated, c.Sequence
+		s.collectTransportEvents()
+		if c.Type == "rewind_phrase" || c.Type == "seek_backward" || c.Type == "seek_forward" {
+			s.emit("transport_changed")
+		} else {
+			s.emit("session_changed")
+		}
+		return s.snapshot(), nil
+	}
 	if c.Position != nil && c.Type != "seek" {
 		return reject(InvalidCommand, "position is only valid for seek")
 	}
