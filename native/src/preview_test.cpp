@@ -1,6 +1,9 @@
 #include "riffine_preview.h"
+#include "riffine_audio.h"
+#include "riffine_decode.h"
 #include "riffine_preview_queue.h"
 #include <chrono>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -12,8 +15,9 @@
 #include <vector>
 static bool trackAllocations=false;
 static unsigned allocations=0;
+static size_t largestAllocation=0;
 void *operator new(size_t size) {
-  if(trackAllocations) ++allocations;
+  if(trackAllocations) {++allocations;largestAllocation=std::max(largestAllocation,size);}
   if(void *p=std::malloc(size ? size : 1)) return p;
   throw std::bad_alloc();
 }
@@ -138,6 +142,15 @@ int main() {
     ok(riffine_preview_read(source.get(),block,1024,&count,error,sizeof(error)));
     riffine_preview_info info{};ok(riffine_preview_info_get(source.get(),&info,error,sizeof(error)));
     check(count==1024 && info.decoded_frames<=16384 && info.output_frames==115200000,"long source decoded whole selection before startup");
+    auto longRender=temp.path/"long-render.wav";auto renderName=longRender.u8string();auto longName=longSong.u8string();
+    largestAllocation=0;trackAllocations=true;
+    auto renderResult=riffine_render(longName.c_str(),renderName.c_str(),0,86400000,2,0,error,sizeof(error));
+    trackAllocations=false;ok(renderResult);
+    check(largestAllocation<16*1024*1024,"offline render allocated duration-sized PCM storage");
+    riffine_decoder *rendered=nullptr;ok(riffine_decoder_open_file(renderName.c_str(),&rendered,error,sizeof(error)));
+    riffine_decoder_info renderedInfo{};ok(riffine_decoder_info_get(rendered,&renderedInfo,error,sizeof(error)));riffine_decoder_close(rendered);
+    check(renderedInfo.frames==43200000 && renderedInfo.channels==2 && renderedInfo.source_bits==16,"long render dimensions differ");
+    check(std::filesystem::remove(longRender),"cannot remove long rendered fixture");
     riffine_preview_source *bad=nullptr;auto name=mono.u8string();
     check(riffine_preview_open(name.c_str(),0,999999999,1,0,&bad,error,sizeof(error)) && !bad,"out of bounds accepted");
     riffine_preview_report report{};

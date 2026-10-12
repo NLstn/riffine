@@ -179,7 +179,12 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) error {
 			return err
 		}
 		adapter = native.Adapter{Executable: helper, Stderr: errOut, SilentPreview: silent}
-		service.Renderer = adapter
+		if command == "render" || command == "play" {
+			if err := adapter.CheckSourceRender(ctx); err != nil {
+				return err
+			}
+			service.SourceRenderer = adapter
+		}
 		if command == "preview" {
 			if err := adapter.CheckSourcePreview(ctx); err != nil {
 				return err

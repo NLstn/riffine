@@ -13,7 +13,9 @@ import (
 	"strconv"
 
 	"github.com/NLstn/riffine/adapters/filesystem"
+	"github.com/NLstn/riffine/core/audio"
 	"github.com/NLstn/riffine/core/engine"
+	"github.com/NLstn/riffine/core/resource"
 )
 
 type Adapter struct {
@@ -60,14 +62,63 @@ func (a Adapter) run(ctx context.Context, args ...string) error {
 	return nil
 }
 func (a Adapter) Render(ctx context.Context, r engine.RenderRequest) error {
-	i, err := a.inspectSource(ctx, r.Source)
+	info, err := a.inspectSource(ctx, r.Source)
 	if err != nil {
 		return err
 	}
-	if r.StartFrame < 0 || r.EndFrame <= r.StartFrame || r.EndFrame > i.Frames || math.IsNaN(r.Speed) || math.IsInf(r.Speed, 0) || r.Speed < 0.25 || r.Speed > 2 || math.IsNaN(r.Pitch) || math.IsInf(r.Pitch, 0) || r.Pitch < -12 || r.Pitch > 12 {
+	return a.renderOutput(ctx, info, r, func(tmp string) error {
+		return a.run(ctx, "render", r.Source, tmp, strconv.FormatInt(r.StartFrame, 10), strconv.FormatInt(r.EndFrame, 10), strconv.FormatFloat(r.Speed, 'g', -1, 64), strconv.FormatFloat(r.Pitch, 'g', -1, 64))
+	})
+}
+
+func (a Adapter) CheckSourceRender(ctx context.Context) error {
+	d, err := NewDecoder(ctx, a)
+	if err != nil {
+		return err
+	}
+	if !d.borrowedRender {
+		return errors.New("native source render is unsupported; rebuild the helper with borrowed-render support")
+	}
+	return nil
+}
+
+// RenderSource retains source identity through native teardown. Only native PCM
+// reaches the encoder; output is inspected, synced and published exclusively.
+func (a Adapter) RenderSource(ctx context.Context, reader resource.Reader, info audio.Info, r engine.RenderRequest) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := audio.ValidateInfo(info); err != nil {
+		return err
+	}
+	if err := a.CheckSourceRender(ctx); err != nil {
+		return err
+	}
+	return a.renderOutput(ctx, info, r, func(tmp string) error {
+		cmd, release, err := a.sourceCommand(ctx, reader, "render-handle", tmp, strconv.FormatInt(r.StartFrame, 10), strconv.FormatInt(r.EndFrame, 10), strconv.FormatFloat(r.Speed, 'g', -1, 64), strconv.FormatFloat(r.Pitch, 'g', -1, 64))
+		if err != nil {
+			return err
+		}
+		defer release()
+		cmd.Stderr = a.Stderr
+		if err = cmd.Run(); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("audio render helper: %w", err)
+		}
+		return ctx.Err()
+	})
+}
+
+func (a Adapter) renderOutput(ctx context.Context, info audio.Info, r engine.RenderRequest, process func(string) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if r.StartFrame < 0 || r.EndFrame <= r.StartFrame || r.EndFrame > info.Frames || math.IsNaN(r.Speed) || math.IsInf(r.Speed, 0) || r.Speed < .25 || r.Speed > 2 || math.IsNaN(r.Pitch) || math.IsInf(r.Pitch, 0) || r.Pitch < -12 || r.Pitch > 12 || r.Destination == "" {
 		return errors.New("invalid render request")
 	}
-	if _, err = os.Stat(r.Destination); err == nil {
+	if _, err := os.Lstat(r.Destination); err == nil {
 		return errors.New("output already exists")
 	} else if !os.IsNotExist(err) {
 		return err
@@ -78,8 +129,7 @@ func (a Adapter) Render(ctx context.Context, r engine.RenderRequest) error {
 	}
 	defer os.RemoveAll(dir)
 	tmp := filepath.Join(dir, "render.wav")
-	args := []string{"render", r.Source, tmp, strconv.FormatInt(r.StartFrame, 10), strconv.FormatInt(r.EndFrame, 10), strconv.FormatFloat(r.Speed, 'g', -1, 64), strconv.FormatFloat(r.Pitch, 'g', -1, 64)}
-	if err = a.run(ctx, args...); err != nil {
+	if err = process(tmp); err != nil {
 		return err
 	}
 	out, err := filesystem.Inspect(ctx, tmp)
@@ -87,36 +137,27 @@ func (a Adapter) Render(ctx context.Context, r engine.RenderRequest) error {
 		return fmt.Errorf("invalid rendered audio: %w", err)
 	}
 	want := int64(math.Round(float64(r.EndFrame-r.StartFrame) / r.Speed))
-	if out.Frames != want || out.Channels != i.Channels || out.SampleRate != i.SampleRate {
+	if out.Frames != want || out.Channels != info.Channels || out.SampleRate != info.SampleRate {
 		return errors.New("helper returned unexpected audio dimensions")
+	}
+	file, err := os.OpenFile(tmp, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	err = file.Sync()
+	closeErr := file.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
 	}
 	if err = ctx.Err(); err != nil {
 		return err
 	}
-	src, err := os.Open(tmp)
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-	dst, err := os.OpenFile(r.Destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if err != nil {
-		return err
-	}
-	ok := false
-	defer func() {
-		dst.Close()
-		if !ok {
-			os.Remove(r.Destination)
-		}
-	}()
-	if _, err = io.Copy(dst, src); err != nil {
-		return err
-	}
-	if err = dst.Close(); err != nil {
-		return err
-	}
-	ok = true
-	return nil
+	// Link publishes a complete file without replacing a destination created
+	// during processing. Unsupported filesystems fail without a copy fallback.
+	return os.Link(tmp, r.Destination)
 }
 func (a Adapter) Play(ctx context.Context, path string, loop bool) error {
 	if _, err := filesystem.Inspect(ctx, path); err != nil {

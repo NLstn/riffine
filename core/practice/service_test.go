@@ -602,3 +602,47 @@ func TestSourcePreviewBorrowsVerifiedReaderAndNeverCountsPlayback(t *testing.T) 
 		t.Fatal("preview adapter received an unverified source")
 	}
 }
+
+type sourceRenderRecorder struct {
+	preview sourcePreviewRecorder
+	request engine.RenderRequest
+}
+
+func (r *sourceRenderRecorder) RenderSource(ctx context.Context, reader resource.Reader, info audio.Info, q engine.RenderRequest) error {
+	r.request = q
+	_, err := r.preview.PreviewSource(ctx, reader, info, engine.PreviewRequest{Source: q.Source, StartFrame: q.StartFrame, EndFrame: q.EndFrame, Speed: q.Speed, Pitch: q.Pitch})
+	return err
+}
+func TestSourceRenderRetainsVerifiedReader(t *testing.T) {
+	s, host, legacy := newSession(t)
+	port := &sourceRenderRecorder{preview: sourcePreviewRecorder{host: host}}
+	s.service.SourceRenderer = port
+	loop := project.Loop{Enabled: true, Start: .25, End: .75}
+	dispatchLive(t, s, Command{Type: "set_loop", Loop: &loop})
+	before := s.Snapshot()
+	opened := host.opened
+	if err := s.Render(context.Background(), "opaque:output"); err != nil {
+		t.Fatal(err)
+	}
+	if legacy.called || port.preview.calls != 1 || host.opened != opened+1 || host.closed != port.preview.closeCountAtCall+1 || port.request.Destination != "opaque:output" || port.request.StartFrame != 12000 || port.request.EndFrame != 36000 {
+		t.Fatal("render reader/selection ownership differs")
+	}
+	if !reflect.DeepEqual(before, s.Snapshot()) {
+		t.Fatal("render changed session")
+	}
+	batch := s.DrainEvents()
+	if len(batch.Events) != 1 || batch.Events[0].Type != "session_changed" {
+		t.Fatal("render emitted playback events")
+	}
+	host.data["opaque:original"][50] ^= 1
+	errorCode(t, s.Render(context.Background(), "opaque:output"), IdentityMismatch)
+	if port.preview.calls != 1 {
+		t.Fatal("render received unverified source")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	errorCode(t, s.Render(ctx, "opaque:output"), Cancelled)
+	if port.preview.calls != 1 {
+		t.Fatal("cancelled render reached adapter")
+	}
+}

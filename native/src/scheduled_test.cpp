@@ -1,4 +1,6 @@
 #include "riffine_scheduled.h"
+#include "riffine_audio.h"
+#include "riffine_decode.h"
 #include "riffine_preview.h"
 #include "encoded_file.h"
 #include <algorithm>
@@ -73,6 +75,27 @@ struct InputResource {
  uint64_t position() const{auto position=lseek(handle,0,SEEK_CUR);check(position>=0,"caller tell failed");return uint64_t(position);}
 #endif
 };
+void rendered(const fs::path &path,uint64_t handle,const riffine_schedule &s){
+ auto expected=reference(path,s,handle);
+ auto output=path;output+=".render.wav";auto name=output.u8string();
+ ok(riffine_render_handle(handle,name.c_str(),int64_t(s.start_frame),int64_t(s.end_frame),s.speed,s.semitones,error,sizeof(error)));
+ check(riffine_render_handle(handle,name.c_str(),int64_t(s.start_frame),int64_t(s.end_frame),s.speed,s.semitones,error,sizeof(error))!=0,"render replaced existing output");
+ riffine_decoder *decoder=nullptr;ok(riffine_decoder_open_file(name.c_str(),&decoder,error,sizeof(error)));
+ std::unique_ptr<riffine_decoder,decltype(&riffine_decoder_close)> owner(decoder,riffine_decoder_close);
+ riffine_decoder_info info{};ok(riffine_decoder_info_get(decoder,&info,error,sizeof(error)));
+ check(info.frames==s.output_end-s.output_start && info.channels==2 && info.source_bits==16,"render dimensions differ");
+ std::vector<float> block(8192*2);uint64_t offset=0;uint32_t count=0;
+ do{
+  ok(riffine_decoder_read(decoder,block.data(),8192,&count,error,sizeof(error)));
+  for(size_t i=0;i<size_t(count)*2;++i){
+   auto q=std::lround(std::clamp(double(expected[size_t(offset)*2+i]),-1.0,1.0)*32767);
+   check(block[i]==float(q)/32768,"render differs from quantized shared kernel");
+  }
+  offset+=count;
+ }while(count);
+ check(offset==info.frames,"render ended early");owner.reset();
+ check(fs::remove(output),"cannot remove rendered fixture");
+}
 void exercise(const fs::path &path,bool borrowed=false){
  InputResource resource(path);
  riffine_scheduled_worker *raw=nullptr;auto name=path.u8string();
@@ -80,6 +103,7 @@ void exercise(const fs::path &path,bool borrowed=false){
  Worker worker(raw,riffine_scheduled_close);
  riffine_scheduled_info info{};ok(riffine_scheduled_info_get(raw,&info,error,sizeof(error)));check(info.channels==2&&info.sample_rate==48000&&info.source_frames==48000&&!info.pending&&!info.generation,"incorrect source metadata");
  auto first=schedule(1,1,12000,36000,0,.75,3),second=schedule(1,2,1151,10001,first.output_end,2,-12);
+ rendered(path,resource.token(),first);rendered(path,resource.token(),second);check(resource.position()==17,"render changed caller cursor");
  check(riffine_scheduled_submit(raw,&first,error,sizeof(error))!=0,"accepted schedule before reset");
  ok(riffine_scheduled_reset(raw,1,error,sizeof(error)));ok(riffine_scheduled_submit(raw,&first,error,sizeof(error)));ok(riffine_scheduled_submit(raw,&second,error,sizeof(error)));
  auto third=schedule(1,3,1,2,second.output_end,2,12);

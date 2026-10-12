@@ -1,9 +1,9 @@
 #include "riffine_audio.h"
-#include "riffine_decode.h"
+#include "riffine_preview.h"
 #define NOMINMAX
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
-#include "signalsmith-stretch/signalsmith-stretch.h"
+#include <memory>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -16,19 +16,11 @@ void require(bool ok, const char *message) { if (!ok) throw std::runtime_error(m
 void error_text(char *buffer, size_t size, const char *message) {
   if (buffer && size) std::snprintf(buffer, size, "%s", message);
 }
-struct Decoder {
- riffine_decoder *value=nullptr;
- riffine_decoder_info info{};
- explicit Decoder(const char *path) {
-  char error[512];
-  if(riffine_decoder_open_file(path,&value,error,sizeof(error)))throw std::runtime_error(error);
-  if(riffine_decoder_info_get(value,&info,error,sizeof(error))){riffine_decoder_close(value);value=nullptr;throw std::runtime_error(error);}
- }
- ~Decoder(){riffine_decoder_close(value);}
-};
 struct Encoder {
   ma_encoder value{};
   FILE *file=nullptr;
+  std::filesystem::path path;
+  bool complete=false;
   static ma_result write(ma_encoder *encoder,const void *buffer,size_t bytes,size_t *written) {
     *written=std::fwrite(buffer,1,bytes,static_cast<FILE*>(encoder->pUserData));
     return *written==bytes ? MA_SUCCESS : MA_IO_ERROR;
@@ -41,21 +33,22 @@ struct Encoder {
 #endif
     return result==0 ? MA_SUCCESS : MA_IO_ERROR;
   }
-  Encoder(const char *path, unsigned channels, unsigned rate) {
+  Encoder(const char *name, unsigned channels, unsigned rate):path(std::filesystem::u8path(name)) {
     auto config = ma_encoder_config_init(ma_encoding_format_wav, ma_format_s16, channels, rate);
 #ifdef _WIN32
-    file=_wfopen(std::filesystem::u8path(path).c_str(),L"wbx");
+    file=_wfopen(path.c_str(),L"wbx");
 #else
-    file=std::fopen(path,"wbx");
+    file=std::fopen(name,"wbx");
 #endif
     require(file!=nullptr,"cannot exclusively create output WAV");
-    if(ma_encoder_init(write,seek,file,&config,&value)!=MA_SUCCESS){std::fclose(file);file=nullptr;throw std::runtime_error("cannot initialize WAV encoder");}
+    if(ma_encoder_init(write,seek,file,&config,&value)!=MA_SUCCESS){std::fclose(file);file=nullptr;std::error_code ec;std::filesystem::remove(path,ec);throw std::runtime_error("cannot initialize WAV encoder");}
   }
-  ~Encoder() { if(file){ma_encoder_uninit(&value);std::fclose(file);} }
+  ~Encoder() { if(file){ma_encoder_uninit(&value);std::fclose(file);} if(!complete){std::error_code ec;std::filesystem::remove(path,ec);} }
   void finish() {
     ma_encoder_uninit(&value);
     auto result=std::fclose(file);file=nullptr;
     require(result==0,"cannot finalize output WAV");
+    complete=true;
   }
 };
 struct Engine {
@@ -76,63 +69,44 @@ struct Sound {
 };
 }
 
-int riffine_render(const char *input, const char *output, int64_t start, int64_t end,
-  double speed, double semitones, char *error, size_t error_size) {
-  try {
-    require(input && output, "paths are required");
-    require(!std::filesystem::exists(std::filesystem::u8path(output)), "output already exists");
-    require(std::isfinite(speed) && speed >= .25 && speed <= 2 && std::isfinite(semitones) && semitones >= -12 && semitones <= 12, "invalid speed or pitch");
-    Decoder decoder(input);
-    auto &d = decoder.info;
-    auto length = d.frames;
-    require(start >= 0 && end > start && uint64_t(end) <= length, "invalid frame selection");
-    require(d.channels >= 1 && d.channels <= 2 && d.sample_rate >= 8000 && d.sample_rate <= 192000, "unsupported audio format");
-    auto channels = d.channels;
-    signalsmith::stretch::SignalsmithStretch<float> stretch;
-    stretch.presetDefault(channels, d.sample_rate);
-    stretch.setTransposeSemitones(semitones);
-    int64_t selected = end-start;
-    // Pad short selections to the algorithm's required preroll, then truncate.
-    int64_t padded = std::max<int64_t>(selected, stretch.outputSeekLength(float(speed)) + 2);
-    int64_t outputFrames = std::llround(double(selected)/speed);
-    int64_t paddedOutput = std::llround(double(padded)/speed);
-    require(outputFrames > 0, "selection produces no output frames");
-    require((padded+paddedOutput)*channels <= 64*1024*1024, "offline buffer limit (256 MiB) exceeded; select a shorter loop");
-    std::vector<std::vector<float>> in(channels, std::vector<float>(size_t(padded), 0));
-    std::vector<std::vector<float>> out(channels, std::vector<float>(size_t(paddedOutput), 0));
-    char decodeError[512];
-    require(riffine_decoder_seek(decoder.value,uint64_t(start),decodeError,sizeof(decodeError))==0,"cannot seek input");
-    std::vector<float> block(4096*channels);
-    for (int64_t offset=0; offset<selected;) {
-      auto count=uint32_t(std::min<int64_t>(4096,selected-offset)); uint32_t read=0;
-      require(riffine_decoder_read(decoder.value,block.data(),count,&read,decodeError,sizeof(decodeError))==0 && read==count,"truncated audio data");
-      for(ma_uint64 i=0;i<count;++i) for(unsigned c=0;c<channels;++c) in[c][size_t(offset+i)]=block[size_t(i*channels+c)];
-      offset+=int64_t(count);
-    }
-    require(stretch.exact(in,int(padded),out,int(paddedOutput)), "DSP failed to process selection");
-    // A short fade reduces clicks when a rendered selection is repeated.
-    auto fade=std::min<int64_t>(std::llround(d.sample_rate*.005),outputFrames/2);
-    Encoder encoder(output,channels,d.sample_rate);
-    std::vector<int16_t> pcm(4096*channels);
-    for(int64_t offset=0;offset<outputFrames;) {
-      auto count=ma_uint64(std::min<int64_t>(4096,outputFrames-offset));
-      for(ma_uint64 i=0;i<count;++i) {
-        int64_t frame=offset+int64_t(i);
-        double gain=fade>0 ? std::min({1.0,double(frame)/fade,double(outputFrames-1-frame)/fade}) : 1;
-        for(unsigned c=0;c<channels;++c) {
-          double v=out[c][size_t(frame)]*gain;
-          require(std::isfinite(v),"non-finite DSP output");
-          pcm[size_t(i*channels+c)]=int16_t(std::lround(std::clamp(v,-1.0,1.0)*32767));
-        }
-      }
-      ma_uint64 written=0;
-      require(ma_encoder_write_pcm_frames(&encoder.value,pcm.data(),count,&written)==MA_SUCCESS && written==count,"cannot write rendered audio");
-      offset+=int64_t(count);
-    }
-    encoder.finish();
-    return 0;
-  } catch(const std::exception &e) { error_text(error,error_size,e.what());return 1; }
-  catch(...) { error_text(error,error_size,"unexpected native error");return 1; }
+static int render(const char *input,uint64_t handle,bool borrowed,const char *output,int64_t start,int64_t end,
+ double speed,double semitones,char *error,size_t error_size) {
+ if(error && error_size) error[0]=0;
+ try {
+  require((borrowed || input) && output,"source and output are required");
+  require(!std::filesystem::exists(std::filesystem::u8path(output)),"output already exists");
+  riffine_preview_source *raw=nullptr;char text[512];
+  auto result=borrowed ? riffine_preview_open_handle(handle,start,end,speed,semitones,&raw,text,sizeof(text)) : riffine_preview_open(input,start,end,speed,semitones,&raw,text,sizeof(text));
+  if(result)throw std::runtime_error(text);
+  std::unique_ptr<riffine_preview_source,decltype(&riffine_preview_close)> owner(raw,riffine_preview_close);
+  riffine_preview_info info{};
+  if(riffine_preview_info_get(raw,&info,text,sizeof(text)))throw std::runtime_error(text);
+  require(info.output_frames<=(UINT32_MAX-36)/(2*info.channels),"render exceeds PCM WAV size limit");
+  Encoder encoder(output,info.channels,info.sample_rate);
+  std::vector<float> block(4096*info.channels);
+  std::vector<int16_t> pcm(block.size());uint64_t frames=0;
+  for(;;){
+   uint32_t count=0;
+   if(riffine_preview_read(raw,block.data(),4096,&count,text,sizeof(text)))throw std::runtime_error(text);
+   if(!count)break;
+   for(size_t i=0;i<size_t(count)*info.channels;++i){
+    require(std::isfinite(block[i]),"non-finite DSP output");
+    pcm[i]=int16_t(std::lround(std::clamp(double(block[i]),-1.0,1.0)*32767));
+   }
+   ma_uint64 written=0;
+   require(ma_encoder_write_pcm_frames(&encoder.value,pcm.data(),count,&written)==MA_SUCCESS && written==count,"cannot write rendered audio");
+   frames+=count;
+  }
+  require(frames==info.output_frames,"incomplete rendered selection");
+  encoder.finish();return 0;
+ }catch(const std::exception &e){error_text(error,error_size,e.what());return 1;}
+ catch(...){error_text(error,error_size,"unexpected native error");return 1;}
+}
+int riffine_render(const char *input,const char *output,int64_t start,int64_t end,double speed,double semitones,char *error,size_t error_size){
+ return render(input,0,false,output,start,end,speed,semitones,error,error_size);
+}
+int riffine_render_handle(uint64_t handle,const char *output,int64_t start,int64_t end,double speed,double semitones,char *error,size_t error_size){
+ return render(nullptr,handle,true,output,start,end,speed,semitones,error,error_size);
 }
 
 int riffine_play(const char *input, int loop, char *error, size_t error_size) {

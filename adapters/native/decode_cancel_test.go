@@ -23,7 +23,7 @@ func TestMain(m *testing.M) {
 			} else if os.Getenv("RIFFINE_DECODER_TEST_LEGACY_PREVIEW") == "1" {
 				fmt.Print(`{"abi":1,"formats":["wav-pcm","flac","mp3"],"borrowedSources":true}`)
 			} else {
-				fmt.Print(`{"abi":1,"formats":["wav-pcm","flac","mp3"],"borrowedSources":true,"borrowedPreview":true}`)
+				fmt.Print(`{"abi":1,"formats":["wav-pcm","flac","mp3"],"borrowedSources":true,"borrowedPreview":true,"borrowedRender":true}`)
 			}
 		case "decoder-info-handle":
 			frames := 48000
@@ -31,6 +31,11 @@ func TestMain(m *testing.M) {
 				frames = 1024
 			}
 			fmt.Printf(`{"encoding":"mp3","sampleRate":48000,"channels":1,"bits":0,"frames":%d}`, frames)
+		case "render-handle":
+			if err := os.WriteFile(os.Getenv("RIFFINE_DECODER_TEST_SIGNAL"), []byte("started"), 0600); err != nil {
+				os.Exit(1)
+			}
+			time.Sleep(time.Hour)
 		case "decoder-read-handle":
 			if os.Getenv("RIFFINE_DECODER_TEST_FINAL_WAIT") == "1" {
 				if _, err := os.Stdout.Write(make([]byte, 1024*4)); err != nil {
