@@ -6,7 +6,7 @@ export class CountersBusyError extends Error {}
 const words = 16, bytes = words * 4;
 const version = 0, channelsIndex = 1, capacityIndex = 2, writeIndex = 3, readIndex = 4,
  stateIndex = 5, eofIndex = 6, copiedLow = 7, copiedHigh = 8, counterSequence = 9,
- underrunLow = 10, underrunHigh = 11;
+ underrunLow = 10, underrunHigh = 11, failureIndex = 12, failureFrameLow = 13, failureFrameHigh = 14, failureCount = 15;
 const uint32Range = 4294967296;
 
 export function createOutputQueue(channels, capacity = 32768) {
@@ -25,6 +25,15 @@ class Queue {
   if (Atomics.load(this.header, version) !== 1 || (this.channels !== 1 && this.channels !== 2) || this.capacity < 128 || this.capacity > 65536 || (this.capacity & (this.capacity - 1)) || buffer.byteLength !== bytes + this.capacity * this.channels * 4) throw new Error('Invalid shared output queue.');
   this.pcm = new Float32Array(buffer, bytes);
   this.mask = this.capacity - 1;
+  this.failureFrame = new Float64Array(1); this.failureWords = new Int32Array(this.failureFrame.buffer);
+ }
+ failureCode() { return Atomics.load(this.header, failureIndex); }
+ failureMessage() {
+  const code = Atomics.load(this.header, failureIndex);
+  if (!code) return 'Output queue no longer accepts PCM.';
+  this.failureWords[0] = Atomics.load(this.header, failureFrameLow); this.failureWords[1] = Atomics.load(this.header, failureFrameHigh);
+  const reasons = ['','Missing output channels','Invalid output dimensions','Corrupt output cursors','Invalid presentation coordinates','Presentation timeline capacity exhausted','Presentation timeline rejected output'];
+  return `${reasons[code] || 'Unknown output fault'} (context frame ${this.failureFrame[0]}, ${code === 4 ? 'previous context end (low32)' : 'copied block'} ${Atomics.load(this.header, failureCount) >>> 0}).`;
  }
  close() { Atomics.store(this.header, stateIndex, QueueState.closed); }
 }
@@ -34,7 +43,7 @@ export class OutputWriter extends Queue {
  write(pcm) {
   if (!(pcm instanceof Float32Array) || pcm.length < this.channels || pcm.length > 8192 * this.channels || pcm.length % this.channels) throw new Error('Invalid output PCM block.');
   const state = Atomics.load(this.header, stateIndex);
-  if (state !== QueueState.primed && state !== QueueState.running && state !== QueueState.pausing && state !== QueueState.paused || Atomics.load(this.header, eofIndex)) throw new Error('Output queue no longer accepts PCM.');
+  if (state !== QueueState.primed && state !== QueueState.running && state !== QueueState.pausing && state !== QueueState.paused || Atomics.load(this.header, eofIndex)) throw new Error(this.failureMessage());
   const write = Atomics.load(this.header, writeIndex) >>> 0;
   const read = Atomics.load(this.header, readIndex) >>> 0;
   const used = (write - read) >>> 0;
@@ -79,7 +88,26 @@ export class OutputWriter extends Queue {
 // updates fixed atomic integer fields: no allocation, locks, waits, messages,
 // decoding, DSP, logging, Go calls or practice policy on the audio callback.
 export class OutputConsumer extends Queue {
- constructor(buffer, timeline) { super(buffer); this.timeline = timeline ? new PresentationWriter(timeline) : undefined; }
+ constructor(buffer, timeline) {
+  super(buffer); this.timeline = timeline ? new PresentationWriter(timeline) : undefined;
+  this.lastBlock = timeline ? new Float32Array(8192 * this.channels) : undefined;
+  this.lastFrame = -1; this.lastQuantum = 0; this.lastResult = true;
+ }
+ remember(outputs, frame, quantum, result) {
+  if (this.lastBlock) {
+   for (let c = 0; c < this.channels; c++) for (let i = 0; i < quantum; i++) this.lastBlock[c * 8192 + i] = outputs[c][i];
+   this.lastFrame = frame; this.lastQuantum = quantum; this.lastResult = result;
+  }
+  return result;
+ }
+ fault(code, frame = 0, count = 0) {
+  // Fixed diagnostic words preserve the callback failure without logging,
+  // messages, allocating an exception or accessing the shared core.
+  this.failureFrame[0] = frame;
+  Atomics.store(this.header, failureFrameLow, this.failureWords[0]); Atomics.store(this.header, failureFrameHigh, this.failureWords[1]);
+  Atomics.store(this.header, failureCount, count); Atomics.store(this.header, failureIndex, code);
+  Atomics.store(this.header, stateIndex, QueueState.error); return false;
+ }
  addCounter(lowIndex, highIndex, increment) {
   const low = Atomics.load(this.header, lowIndex) >>> 0;
   const sum = low + increment;
@@ -87,23 +115,32 @@ export class OutputConsumer extends Queue {
   if (sum >= uint32Range) Atomics.add(this.header, highIndex, 1);
  }
  process(outputs, contextFrame) {
-  if (!outputs) { Atomics.store(this.header, stateIndex, QueueState.error); return false; }
+  if (!outputs) return this.fault(1);
   for (let c = 0; c < outputs.length; c++) outputs[c].fill(0);
   const state = Atomics.load(this.header, stateIndex);
-  // A pause request is acknowledged only on a callback boundary, after any
-  // preceding copy/counters/timeline publication. Keep the context graph alive
-  // with silence so device timestamps can catch up to submitted PCM.
-  if (state === QueueState.pausing) { Atomics.store(this.header, stateIndex, QueueState.paused); return true; }
-  if (state !== QueueState.running) return state === QueueState.primed || state === QueueState.paused;
-  if (outputs.length !== this.channels || !outputs[0] || !outputs[0].length) { Atomics.store(this.header, stateIndex, QueueState.error); return false; }
+  if (state === QueueState.closed || state === QueueState.error) return false;
+  if (outputs.length !== this.channels || !outputs[0] || !outputs[0].length) return this.fault(2, contextFrame);
   const quantum = outputs[0].length;
-  for (let c = 1; c < this.channels; c++) if (outputs[c].length !== quantum) { Atomics.store(this.header, stateIndex, QueueState.error); return false; }
+  if (quantum > 8192) return this.fault(2, contextFrame, quantum);
+  for (let c = 1; c < this.channels; c++) if (outputs[c].length !== quantum) return this.fault(2, contextFrame, quantum);
+  // A host may pull the same render quantum again. Reproduce exactly its first
+  // output, including silence/EOF, without consuming another queued block or
+  // publishing another timeline/counter entry. Never remap overlapping windows.
+  if (this.lastBlock && contextFrame === this.lastFrame) {
+   if (quantum !== this.lastQuantum) return this.fault(4, contextFrame, this.timeline.contextEnd);
+   for (let c = 0; c < this.channels; c++) for (let i = 0; i < quantum; i++) outputs[c][i] = this.lastBlock[c * 8192 + i];
+   return this.lastResult;
+  }
+  // Pause is acknowledged on a NEW callback boundary. A repeated pull must keep
+  // the preceding PCM intact while the device timestamp catches up to that block.
+  if (state === QueueState.pausing) { Atomics.store(this.header, stateIndex, QueueState.paused); return this.remember(outputs, contextFrame, quantum, true); }
+  if (state !== QueueState.running) return this.remember(outputs, contextFrame, quantum, state === QueueState.primed || state === QueueState.paused);
   const read = Atomics.load(this.header, readIndex) >>> 0;
   const write = Atomics.load(this.header, writeIndex) >>> 0;
   const available = (write - read) >>> 0;
-  if (available > this.capacity) { Atomics.store(this.header, stateIndex, QueueState.error); return false; }
+  if (available > this.capacity) return this.fault(3, contextFrame, quantum);
   const count = Math.min(available, quantum);
-  if (count && this.timeline && !this.timeline.canAppend(contextFrame, count)) { Atomics.store(this.header, stateIndex, QueueState.error); return false; }
+  if (count && this.timeline && !this.timeline.canAppend(contextFrame, count)) return this.fault(this.timeline.errorCode() === 2 ? 4 : this.timeline.errorCode() === 3 ? 5 : 6, contextFrame, this.timeline.errorCode() === 2 ? this.timeline.contextEnd : count);
   for (let frame = 0; frame < count; frame++) {
    const offset = ((read + frame) & this.mask) * this.channels;
    for (let c = 0; c < this.channels; c++) outputs[c][frame] = this.pcm[offset + c];
@@ -119,7 +156,7 @@ export class OutputConsumer extends Queue {
   const remaining = (finalWrite - ((read + count) >>> 0)) >>> 0;
   if (count < quantum && (!eof || remaining > 0)) this.addCounter(underrunLow, underrunHigh, quantum - count);
   Atomics.add(this.header, counterSequence, 1);
-  if (eof && remaining === 0) { Atomics.store(this.header, stateIndex, QueueState.done); return false; }
-  return true;
+  if (eof && remaining === 0) { Atomics.store(this.header, stateIndex, QueueState.done); return this.remember(outputs, contextFrame, quantum, false); }
+  return this.remember(outputs, contextFrame, quantum, true);
  }
 }

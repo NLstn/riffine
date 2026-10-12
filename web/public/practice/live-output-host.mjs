@@ -62,7 +62,7 @@ export class LiveOutputHost {
   if (this.presentedState !== PresentedState.active || this.closed || this.failure) return;
   let snapshot;
   try { snapshot = this.writer.snapshot(); } catch (error) { if (error instanceof CountersBusyError) return; throw error; }
-  if (snapshot.state === QueueState.error || snapshot.state === QueueState.closed) throw new Error('Live output queue stopped.');
+  if (snapshot.state === QueueState.error || snapshot.state === QueueState.closed) throw new Error(this.writer.failureMessage());
   if (snapshot.copiedFrames > frames && performance.now() - this.monitor.progressAt > 10000) throw new Error('Live device presentation stopped advancing.');
  }
  releaseOutput() {
@@ -74,6 +74,7 @@ export class LiveOutputHost {
    this.failure = error instanceof Error ? error : new Error(String(error));
    this.releaseOutput();
    this.closing = this.closeContext().then(() => {
+    if (this.writer?.failureCode() && !this.failure.message.includes(this.writer.failureMessage())) this.failure = new Error(`${this.failure.message}; ${this.writer.failureMessage()}`);
     this.counter?.publish(this.counter.frames, PresentedState.failed);
     this.onFailure(this.failure);
    });

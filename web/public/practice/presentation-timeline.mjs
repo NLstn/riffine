@@ -20,7 +20,8 @@ class Timeline {
   if (Atomics.load(this.data, versionIndex) !== 1 || this.capacity < 2 || this.capacity > 4096 || (this.capacity & (this.capacity - 1)) || buffer.byteLength !== (headerWords + entryWords * this.capacity) * 4) throw new TimelineError('Invalid shared presentation timeline.');
   this.mask = this.capacity - 1;
  }
- fail() { Atomics.store(this.data, errorIndex, 1); }
+ fail(code = 1) { Atomics.store(this.data, errorIndex, code); }
+ errorCode() { return Atomics.load(this.data, errorIndex); }
 }
 export class PresentationWriter extends Timeline {
  constructor(buffer) { super(buffer); this.totalFrames = 0; this.contextEnd = 0; }
@@ -30,7 +31,8 @@ export class PresentationWriter extends Timeline {
   if (Atomics.load(this.data, errorIndex)) return false;
   const write = Atomics.load(this.data, writeIndex) >>> 0;
   const read = Atomics.load(this.data, readIndex) >>> 0;
-  if (!Number.isSafeInteger(contextFrame) || contextFrame < this.contextEnd || !Number.isInteger(count) || count < 1 || count > 8192 || !Number.isSafeInteger(contextFrame + count) || !Number.isSafeInteger(this.totalFrames + count) || ((write - read) >>> 0) >= this.capacity) { this.fail(); return false; }
+  if (!Number.isSafeInteger(contextFrame) || contextFrame < this.contextEnd || !Number.isInteger(count) || count < 1 || count > 8192 || !Number.isSafeInteger(contextFrame + count) || !Number.isSafeInteger(this.totalFrames + count)) { this.fail(2); return false; }
+  if (((write - read) >>> 0) >= this.capacity) { this.fail(3); return false; }
   return true;
  }
  // Sole writer calls only after canAppend succeeded and PCM was copied. Reader

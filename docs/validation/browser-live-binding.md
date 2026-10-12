@@ -72,10 +72,26 @@ pause reported 39 complete loops at 0.415 seconds. These are browser API positio
 estimates, not independent speaker measurements or music-quality evidence.
 A deliberately five-source-frame loop exhausted lookahead, showed an explicit
 error, and recovered through the workspace button to stopped position/counts.
-A later keyboard/startup check also observed an interruption with the half-second
-selection at 1/0. Its original host cause remains under investigation: automated
-Go/C++ binding traces pass, but a clean actual-browser retry is pending browser
-approval. This is a remaining host-validation gap, not a listening-quality claim.
+The normal-speed follow-up exposed repeated callback render positions: frame
+441216 was supplied again after the preceding block already ended at 441344.
+The callback now caches exactly one render block (up to 8192 frames/channel)
+and reuses its PCM for an identical frame/size request. It neither consumes new
+queue data nor publishes another timeline/counter entry. Pause requires a distinct
+render boundary, and repeated EOF tails preserve their original samples. Other
+overlaps, size changes and corrupt/exhausted timelines still fail closed.
+
+Callback failure details use reserved fixed queue-header words and setup-time
+scratch space, with no callback logging/messages/errors allocated. The main host
+reports the detail only after its context-close fence; local console diagnostics
+do not change transport policy or UI counts. The production-worklet threaded test
+now repeats blocks while retaining exact PCM/counters, and focused checks cover
+stereo repeats after entry retirement, pause, EOF and rejected different overlaps.
+
+After this fix an actual 1/0 browser run reached 690 complete half-second loops,
+then paused through a remapped key at 0.506 source seconds. This demonstrates the
+host workflow with browser position estimates; independent physical presentation
+accuracy and listening quality remain unverified.
+
 
 ## Remaining gates
 

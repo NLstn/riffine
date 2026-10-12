@@ -106,3 +106,23 @@ const failing = new PresentationMonitor({ sampleRate: rate, getOutputTimestamp: 
 failing.sample(); failing.context.getOutputTimestamp = () => ({contextTime: NaN, performanceTime: 1});
 const invalidClock = failing.finish(128); await assert.rejects(invalidClock, /Invalid output timestamp/); assert(failure instanceof TimelineError); failing.close();
 console.log(JSON.stringify({ monitorWaitsForDevicePosition: true, monitorCloseRejectsWait: true, monitorClockFailureRejectsWait: true }));
+
+// Repeated host pulls for the identical render window are idempotent. Reuse the
+// original stereo PCM, even after its timeline entry was retired. Pause waits
+// for a distinct quantum; an EOF tail is reproducible without another count.
+const rq=createOutputQueue(2,512), rw=new OutputWriter(rq), rt=createPresentationTimeline(8), rc=new OutputConsumer(rq,rt), rr=new PresentationReader(rt,rate);
+const interleaved=new Float32Array(512);
+for(let i=0;i<256;i++){interleaved[i*2]=i/512;interleaved[i*2+1]=-i/512;}
+rw.write(interleaved);rw.start();
+const firstBlock=[new Float32Array(128),new Float32Array(128)];rc.process(firstBlock,441216);
+assert.equal(rr.observe(stamp(441344)),128);
+const beforeRepeat=rw.snapshot();rw.requestPause();
+const duplicate=[new Float32Array(128),new Float32Array(128)];
+for(let i=0;i<4;i++){assert.equal(rc.process(duplicate,441216),true);assert.deepEqual(duplicate,firstBlock);}
+assert.equal(rw.snapshot().copiedFrames,beforeRepeat.copiedFrames);assert.equal(rw.snapshot().underrunFrames,beforeRepeat.underrunFrames);assert.equal(rw.snapshot().state,QueueState.pausing);
+assert.equal(rc.process(duplicate,441344),true);assert(duplicate.every(channel=>channel.every(value=>value===0)));assert.equal(rw.snapshot().state,QueueState.paused);
+rw.resume();rw.sealEOF();assert.equal(rc.process(duplicate,441472),false);const terminal=duplicate.map(channel=>channel.slice());
+assert.equal(rc.process(duplicate,441472),false);assert.deepEqual(duplicate,terminal);assert.equal(rw.snapshot().copiedFrames,256);assert.equal(rr.observe(stamp(441600)),256);
+const badq=createOutputQueue(1,512), badw=new OutputWriter(badq), badc=new OutputConsumer(badq,createPresentationTimeline());badw.write(new Float32Array(256));badw.start();
+assert(badc.process(out,1024));assert.equal(badc.process(out,1088),false);assert.match(badw.failureMessage(),/Invalid presentation coordinates/);assert.equal(badw.snapshot().copiedFrames,128);assert(out[0].every(value=>value===0));
+console.log(JSON.stringify({duplicateRenderWindowReusesPCM:true,noDuplicateCopiesOrAcknowledgements:true,pauseRequiresNewRenderBoundary:true,duplicateEOFTailPreserved:true,otherOverlapsFailClosed:true}));
