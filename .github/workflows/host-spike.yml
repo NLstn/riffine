@@ -121,6 +121,9 @@ jobs:
           go run ./cmd/riffine tone --out build/browser-conformance.wav --seconds 1
           node scripts/check-browser-preview.mjs > build/browser-dsp/preview.json
           node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-binding.json
+          RIFFINE_LIVE_SPEED=1 RIFFINE_LIVE_PITCH=0 node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-binding-normal.json
+          RIFFINE_LIVE_SPEED=.25 RIFFINE_LIVE_PITCH=-12 node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-binding-min.json
+          RIFFINE_LIVE_SPEED=2 RIFFINE_LIVE_PITCH=12 node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-binding-max.json
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -132,4 +135,7 @@ jobs:
             build/browser-dsp/preview.json
             build/browser-dsp/schedules.json
             build/browser-dsp/live-binding.json
+            build/browser-dsp/live-binding-normal.json
+            build/browser-dsp/live-binding-min.json
+            build/browser-dsp/live-binding-max.json
           if-no-files-found: warn
