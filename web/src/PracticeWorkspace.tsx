@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
-import { loadShortcuts, saveShortcuts, shortcutKeys, matchShortcut } from './practice-shortcuts';
+import { loadShortcuts, saveShortcuts, shortcutKeys, shortcutActions, matchShortcut } from './practice-shortcuts';
 import PracticePlans from './PracticePlans';
-import { BrowserPractice, presentationSnapshot } from './practice';
+import { BrowserPractice, presentationSnapshot, practiceActionLabels } from './practice';
 import type { EditCommand, LiveCommand, PracticeFacade, PracticeResponse, Snapshot, WaveWindow } from './practice';
 
 export default function PracticeWorkspace({ source, onClose, createFacade = () => new BrowserPractice() }: { source?: File; onClose: () => void; createFacade?: () => PracticeFacade }) {
@@ -39,7 +39,7 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
  const install = (response: PracticeResponse, syncForms = false) => {
   if (response.snapshot) {
    const current = response.snapshot;
-   setSnapshot(previous => presentationSnapshot(previous, current, syncForms)); if (syncForms) { setSourceSession(previous => previous + 1); setSpeed(String(current.project.settings.speed * 100)); setPitch(String(current.project.settings.pitch));
+   setSnapshot(previous => presentationSnapshot(previous, current, syncForms)); if (syncForms) { setSourceSession(previous => previous + 1); setSpeed(String(Number((current.project.settings.speed * 100).toPrecision(15)))); setPitch(String(current.project.settings.pitch));
    setStart(String(current.project.settings.loop.start)); setEnd(String(current.project.settings.loop.end)); setNotes(current.project.annotations.notes ?? ''); }
   }
   if (response.error) throw new Error(`${response.error.code}: ${response.error.message}`);
@@ -90,7 +90,11 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
  }, [busy, snapshot?.capabilities.liveTransport, snapshot?.transport?.state]);
  const transport = (command: LiveCommand) => run(async () => {
   if (!facade.current?.transport || !snapshot) return;
-  install(await facade.current.transport(snapshot, command));
+  const response = install(await facade.current.transport(snapshot, command));
+  if (command.type in practiceActionLabels && response.snapshot) {
+   const settings = response.snapshot.project.settings;
+   setSpeed(String(Number((settings.speed * 100).toPrecision(15)))); setPitch(String(settings.pitch)); setStart(String(settings.loop.start)); setEnd(String(settings.loop.end));
+  }
   setStatus(command.type === 'recover' ? 'Playback recovered. Press Play to start.' : command.type === 'select_practice_plan' ? 'Practice plan selected. Press Play to start.' : 'Playback updated.');
  });
  const canPlay = !!snapshot && (snapshot.capabilities.liveTransport || (facade.current?.liveSupported && snapshot.capabilities.streamPreview)) && snapshot.transport?.state !== 'error' && snapshot.transport?.plan?.state !== 'completed';
@@ -98,7 +102,7 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
  const keydown = (event: KeyboardEvent<HTMLElement>) => {
   const action = matchShortcut(event.nativeEvent, shortcuts);
   if (!action || !snapshot) return;
-  const available = action === 'play_pause' ? canPlay : snapshot.capabilities.liveTransport && snapshot.transport?.state !== 'error';
+  const available = action === 'play_pause' ? canPlay : action === 'restart' || action === 'stop' ? snapshot.capabilities.liveTransport && snapshot.transport?.state !== 'error' : !!((snapshot.capabilities.liveTransport || (facade.current?.liveSupported && snapshot.capabilities.streamPreview)) && snapshot.transport?.state !== 'error');
   if (!available) return;
   event.preventDefault();
   // Consume repeats without delivering a second command; the operation latch
@@ -194,7 +198,7 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
    <summary>Keyboard shortcuts</summary>
    <p>Shortcuts work while focus is in this workspace. Text fields keep their usual keys, and Space still activates a focused button. Holding a key sends one command.</p>
    <label><input type="checkbox" checked={shortcutDraft.enabled} onChange={event => setShortcutDraft({...shortcutDraft,enabled:event.target.checked})} /> Enable practice shortcuts</label>
-   <div className="practice-form">{(['play_pause','restart','stop'] as const).map(action => <label key={action}>{action === 'play_pause' ? 'Play / pause shortcut' : action === 'restart' ? 'Restart shortcut' : 'Stop shortcut'}<select value={shortcutDraft.bindings[action]} onChange={event => setShortcutDraft({...shortcutDraft,bindings:{...shortcutDraft.bindings,[action]:event.target.value}})}>{shortcutKeys.map(key => <option key={key} value={key}>{key || 'No shortcut'}</option>)}</select></label>)}</div>
+   <div className="practice-form">{shortcutActions.map(action => <label key={action}>{action === 'play_pause' ? 'Play / pause shortcut' : action === 'restart' ? 'Restart shortcut' : action === 'stop' ? 'Stop shortcut' : `${practiceActionLabels[action]} shortcut`}<select value={shortcutDraft.bindings[action]} onChange={event => setShortcutDraft({...shortcutDraft,bindings:{...shortcutDraft.bindings,[action]:event.target.value}})}>{shortcutKeys.map(key => <option key={key} value={key}>{key || 'No shortcut'}</option>)}</select></label>)}</div>
    <button type="button" onClick={applyShortcuts}>Save shortcuts</button>
    {shortcutWarning && <p role="alert" className="practice-error">{shortcutWarning}</p>}
   </details>
@@ -208,6 +212,8 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
     <button type="button" disabled={busy || !snapshot.capabilities.liveTransport || snapshot.transport?.state === 'error'} aria-keyshortcuts={shortcutAttribute('restart')} onClick={() => void transport({type:'restart'})}>Restart</button>
     {snapshot.capabilities.liveTransport && <button type="button" disabled={busy} onClick={() => void releasePlayback()}>Close playback</button>}
     {snapshot.transport?.state === 'error' && <button type="button" disabled={busy} onClick={() => void transport({type:'recover'})}>Recover playback</button>}<button type="button" disabled={busy} onClick={() => void overview()}>Full overview</button><button type="button" disabled={busy} onClick={() => void zoom()}>Exact selection zoom</button></div>
+   <div className="practice-actions" aria-label="Practice actions">{(Object.keys(practiceActionLabels) as (keyof typeof practiceActionLabels)[]).map(action => <button type="button" key={action} aria-keyshortcuts={shortcutAttribute(action)} disabled={busy || snapshot.transport?.state === 'error' || !((facade.current?.liveSupported && snapshot.capabilities.streamPreview) || snapshot.capabilities.liveTransport)} onClick={() => void transport({type:action})}>{practiceActionLabels[action]}</button>)}</div>
+   <p>Rewind keeps playback paused or playing. Seeking stays within the active selection; A/B use its acknowledged source position. Next phrase follows saved order. Reset stops playback, restores 100% speed and zero pitch, and disables looping; saved phrases, notes and plans stay available.</p>
    {snapshot.transport && <>
     <p aria-label="Playback position">{snapshot.transport.state} · {(snapshot.transport.sourceFrame / snapshot.project.track.audio.sampleRate).toFixed(3)} source seconds · {snapshot.transport.completedLoops} completed loops</p>
     <div className="practice-form"><label>Seek (source seconds)<input type="number" step={1 / snapshot.project.track.audio.sampleRate} value={seekSeconds} onChange={event => setSeekSeconds(event.target.value)} disabled={busy} /></label><button type="button" disabled={busy || snapshot.transport.state === 'error'} onClick={() => void transport({type:'seek',position:Math.round(Number(seekSeconds)*snapshot.project.track.audio.sampleRate)})}>Seek</button></div>

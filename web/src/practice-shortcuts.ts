@@ -1,9 +1,9 @@
 // Foreground keyboard discovery/focus policy belongs to the client. Actions
 // below call the same shared-core facade as the visible playback buttons.
-export const shortcutActions = ['play_pause', 'restart', 'stop'] as const;
+export const shortcutActions = ['play_pause', 'restart', 'stop', 'rewind_phrase', 'seek_backward', 'seek_forward', 'set_a', 'set_b', 'next_region', 'speed_down', 'speed_up', 'practice_reset'] as const;
 export type ShortcutAction = typeof shortcutActions[number];
 export interface ShortcutSettings { version: 1; enabled: boolean; bindings: Record<ShortcutAction, string> }
-export const defaultShortcuts: ShortcutSettings = { version: 1, enabled: true, bindings: {play_pause:'Space', restart:'R', stop:'S'} };
+export const defaultShortcuts: ShortcutSettings = { version: 1, enabled: true, bindings: {play_pause:'Space', restart:'R', stop:'S', rewind_phrase:'Q', seek_backward:'J', seek_forward:'L', set_a:'A', set_b:'B', next_region:'N', speed_down:'D', speed_up:'F', practice_reset:'T'} };
 const preferenceKey = 'riffine.practice.shortcuts.v1';
 export const shortcutKeys = ['', 'Space', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'];
 export function validateShortcuts(value: unknown): ShortcutSettings {
@@ -13,7 +13,9 @@ export function validateShortcuts(value: unknown): ShortcutSettings {
  const bindings = {} as Record<ShortcutAction, string>;
  const used = new Set<string>();
  for (const action of shortcutActions) {
-  const key = settings.bindings[action];
+  // Additive v1 migration keeps the original three required bindings and
+  // leaves new actions unbound for existing preferences, without a write.
+  const key = settings.bindings[action] ?? (['play_pause','restart','stop'].includes(action) || Object.prototype.hasOwnProperty.call(settings.bindings,action) ? undefined : '');
   if (!shortcutKeys.includes(key)) throw new Error('Choose Space or a letter key for each shortcut.');
   if (key && used.has(key)) throw new Error('Each shortcut must use a different key.');
   if (key) used.add(key); bindings[action] = key;

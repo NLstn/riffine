@@ -22,6 +22,7 @@ type sessionDevice struct {
 	closed                          int
 	failStart, failReset, failClose bool
 	closeReaderCount                int
+	afterReset                      func()
 	host                            *memoryHost
 }
 
@@ -36,6 +37,9 @@ func (d *sessionDevice) Reset(ctx context.Context, generation uint64) error {
 	}
 	d.generation = generation
 	d.schedules, d.pending = nil, nil
+	if d.afterReset != nil {
+		d.afterReset()
+	}
 	return nil
 }
 func (d *sessionDevice) Schedule(ctx context.Context, schedule engine.Schedule) error {

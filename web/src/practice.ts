@@ -16,7 +16,9 @@ export function presentationSnapshot(previous: Snapshot | undefined, current: Sn
 }
 export type EditCommand = { type: 'set_parameters'; speed?: number; pitch?: number } | { type: 'set_loop'; loop: Project['settings']['loop'] } | { type: 'set_annotations'; annotations: Annotations } | { type: 'set_practice_plans'; practicePlans: PracticePlan[] };
 export interface PracticeResponse { version: number; snapshot?: Snapshot; window?: WaveWindow; document?: string; preview?: { outputFrames: number; copiedFrames: number; underrunFrames: number; startupMilliseconds: number }; events?: { events: { sequence: number; type: string }[]; dropped: number }; error?: { version: number; code: string; message: string } }
-export type LiveCommand = { type: 'play' | 'pause' | 'stop' | 'restart' | 'recover' | 'resume_practice_plan' | 'clear_practice_plan' } | { type: 'seek'; position: number } | { type: 'select_practice_plan'; planId: string };
+export const practiceActionLabels = { rewind_phrase:'Rewind phrase', seek_backward:'Seek back one source second', seek_forward:'Seek forward one source second', set_a:'Set A here', set_b:'Set B here', next_region:'Next saved phrase', speed_down:'Decrease speed by 5 points', speed_up:'Increase speed by 5 points', practice_reset:'Reset practice' } as const;
+export type PracticeAction = keyof typeof practiceActionLabels;
+export type LiveCommand = { type: PracticeAction } | { type: 'play' | 'pause' | 'stop' | 'restart' | 'recover' | 'resume_practice_plan' | 'clear_practice_plan' } | { type: 'seek'; position: number } | { type: 'select_practice_plan'; planId: string };
 export interface PracticeFacade {
  open(source: File, project?: File): Promise<PracticeResponse>;
  command(snapshot: Snapshot, command: EditCommand): Promise<PracticeResponse>;
