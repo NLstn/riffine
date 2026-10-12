@@ -1,5 +1,6 @@
 #include "riffine_audio.h"
 #include "riffine_control.h"
+#include "riffine_output_backend.h"
 #include "riffine_preview.h"
 #include "riffine_decode.h"
 #include <cstring>
@@ -22,6 +23,10 @@ int run(int argc, char **argv) {
     int result=1;
     auto operation = argc > 1 ? std::string(argv[1]) : std::string();
     if(argc==2 && operation=="formats") { std::puts(R"({"abi":1,"formats":["wav-pcm","flac","mp3"],"borrowedSources":true,"borrowedPreview":true,"borrowedRender":true,"scheduledControl":1})"); return 0; }
+    if(argc==2 && operation=="device-info"){
+      auto info=riffine::probeOutputBackend();
+      std::printf(R"({"sampleRate":%u,"channels":%u,"bufferFrames":%u,"latencyFrames":%u})" "\n",info.sample_rate,info.channels,info.buffer_frames,info.latency_frames);return 0;
+    }
     if(argc==3 && operation=="scheduled-control-handle"){
       std::string value=argv[2];if(value.empty()||value.find_first_not_of("0123456789")!=std::string::npos)throw std::runtime_error("invalid source handle");
       return riffine_scheduled_control(std::stoull(value));
