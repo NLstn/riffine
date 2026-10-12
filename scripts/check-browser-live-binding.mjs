@@ -5,6 +5,8 @@ import { Worker } from 'node:worker_threads';
 import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { LiveOutputHost } from '../web/public/practice/live-output-host.mjs';
+const speed=Number(process.env.RIFFINE_LIVE_SPEED ?? '.75');
+const pitch=Number(process.env.RIFFINE_LIVE_PITCH ?? '3');
 let Processor;
 globalThis.AudioWorkletProcessor = class {};
 globalThis.registerProcessor = (_name, value) => { Processor = value; };
@@ -69,7 +71,7 @@ try {
  let response=requireResponse(await call({type:'import',source:'source',document:'project'}));
  assert.equal(response.snapshot.capabilities.liveTransport,false);
  await command({type:'set_loop',loop:{enabled:true,start:.25,end:.75}});
- await command({type:'set_parameters',speed:.75,pitch:3});
+ await command({type:'set_parameters',speed,pitch});
  response=requireResponse(await call({type:'attach_transport'}));sequence=response.snapshot.sequence;
  assert.equal(sequence,3);assert.equal(response.snapshot.capabilities.liveTransport,true);
  let snapshot=await command({type:'play'});
@@ -78,6 +80,13 @@ try {
  assert.equal(notPresented.transport.completedLoops,0);assert.equal(notPresented.transport.consumedOutputFrame,0);
  pumping=true;
  snapshot=await loops(2);assert.equal(snapshot.transport.completedLoops,2);
+ const previousGeneration=snapshot.transport.generation;
+ snapshot=await command({type:'set_parameters',speed:.6,pitch:5});
+ assert.equal(snapshot.state,'playing');assert.equal(snapshot.project.settings.speed,.6);assert.equal(snapshot.project.settings.pitch,5);
+ assert(snapshot.transport.generation>previousGeneration);
+ snapshot=await loops(snapshot.transport.completedLoops+1);
+ snapshot=await command({type:'set_parameters',speed,pitch});
+ assert.equal(snapshot.state,'playing');snapshot=await loops(snapshot.transport.completedLoops+1);
  snapshot=await command({type:'pause'});assert.equal(snapshot.state,'paused');
  const pausedFrame=snapshot.transport.sourceFrame,pausedLoops=snapshot.transport.completedLoops;
  assert(pausedFrame>=12000&&pausedFrame<=36000);assert(pausedLoops>=2);
@@ -93,7 +102,7 @@ try {
  assert.equal(response.snapshot.capabilities.liveTransport,false);assert.equal(context.closes,1);
  assert(maxRead<=65536);
  const saved=requireResponse(await call({type:'export'})).document;
- const project=JSON.parse(saved);assert.equal(project.settings.speed,.75);assert.equal(project.settings.pitch,3);assert.equal(project.settings.loop.start,.25);assert.equal(project.transport,undefined);
+ const project=JSON.parse(saved);assert.equal(project.settings.speed,speed);assert.equal(project.settings.pitch,pitch);assert.equal(project.settings.loop.start,.25);assert.equal(project.transport,undefined);
  // Fault the presentation clock after starting a real second generation. Error
  // reaches Go only after output closes, then a fresh attachment can play again.
  response=requireResponse(await call({type:'attach_transport'}));sequence=response.snapshot.sequence;
@@ -123,5 +132,5 @@ try {
  assert.equal(response.error.code,'cancelled');assert.equal(response.snapshot.sequence,sequence);assert.equal(response.snapshot.capabilities.liveTransport,false);assert.equal(context.closes,1);
  response=requireResponse(await call({type:'attach_transport'}));sequence=response.snapshot.sequence;
  response=requireResponse(await call({type:'detach_transport'}));sequence=response.snapshot.sequence;assert.equal(context.closes,1);
- console.log(JSON.stringify({actualGoLiveFactory:true,actualCPPWASM:true,presentedLoops:pausedLoops,noQueuedFrameCompletion:true,pausedSourceFrame:pausedFrame,pausePreservesPosition:true,seekResumePartialTraversalNotCounted:true,stoppedResetsCounters:true,detachedClosesContext:true,successfulSequence:sequence,maximumFileRead:maxRead,deviceClockIsSynthetic:true,clockFailureQuiescesBeforeGoError:true,freshAttachmentRecoversPlayback:true,cancelOpeningAwaitsSourceAndDeviceFence:true},null,2));
+ console.log(JSON.stringify({actualGoLiveFactory:true,actualCPPWASM:true,presentedLoops:pausedLoops,noQueuedFrameCompletion:true,pausedSourceFrame:pausedFrame,pausePreservesPosition:true,seekResumePartialTraversalNotCounted:true,stoppedResetsCounters:true,detachedClosesContext:true,successfulSequence:sequence,maximumFileRead:maxRead,deviceClockIsSynthetic:true,speed,pitch,clockFailureQuiescesBeforeGoError:true,freshAttachmentRecoversPlayback:true,cancelOpeningAwaitsSourceAndDeviceFence:true,liveParameterChangesResetGenerationAndContinue:true},null,2));
 } finally {clearInterval(pump);clearTimeout(timeout);await host?.close();await worker.terminate();}

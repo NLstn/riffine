@@ -48,7 +48,8 @@ positions, so this is integration evidence, not physical-device or listening
 evidence. It checks:
 
 - No queued/callback-only frames count as completed loops.
-- Two complete presented traversals, pause position held across idle polls,
+- Complete presented traversals, live speed/pitch edits through fresh generations,
+  pause position held across idle polls,
   seek followed by an uncounted partial traversal, then a complete loop.
 - Stop resets runtime counts/position; detach closes output once.
 - Invalid device timestamps close output before Go reports an error, followed
@@ -58,8 +59,8 @@ evidence. It checks:
 - Original reads stay within 64 KiB and export preserves saved settings without
   runtime transport fields.
 
-CI runs this against its freshly built Go and C++ WASM binaries and retains
-`live-binding.json`. `check-practice-facade.mjs` additionally checks user gesture,
+CI runs this against its freshly built Go and C++ WASM binaries for 0.75/+3,
+1/0, 0.25/−12 and 2/+12 and retains a report for each profile. `check-practice-facade.mjs` additionally checks user gesture,
 setup cancellation, old/new host recovery ordering and exactly-once close using
 the actual facade and host controller. Portable Go tests cover acknowledgement
 bounds and attachment cancellation with device-before-reader ownership.
@@ -71,7 +72,10 @@ pause reported 39 complete loops at 0.415 seconds. These are browser API positio
 estimates, not independent speaker measurements or music-quality evidence.
 A deliberately five-source-frame loop exhausted lookahead, showed an explicit
 error, and recovered through the workspace button to stopped position/counts.
-Restoring the half-second selection allows playback again.
+A later keyboard/startup check also observed an interruption with the half-second
+selection at 1/0. Its original host cause remains under investigation: automated
+Go/C++ binding traces pass, but a clean actual-browser retry is pending browser
+approval. This is a remaining host-validation gap, not a listening-quality claim.
 
 ## Remaining gates
 
