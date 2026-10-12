@@ -114,15 +114,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.24.x'
+          cache: false
       - name: Build scheduled worker with memory/undefined-behavior checks
         run: |
           cmake -S native -B build/native-safety -DCMAKE_BUILD_TYPE=Debug \
             '-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
             '-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
             '-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined'
-          cmake --build build/native-safety --target riffine-scheduled-test riffine-stream-abi-test riffine-presentation-queue-test --parallel 2
+          cmake --build build/native-safety --target riffine-scheduled-test riffine-stream-abi-test riffine-presentation-queue-test riffine-audio --parallel 2
       - run: ctest --test-dir build/native-safety -R 'bounded-scheduled-worker|streaming-c-abi|native-presentation-queue' --output-on-failure --no-tests=error
         env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      - name: Exercise persistent native control under memory checks
+        run: go test -count=1 -run 'TestNativeScheduledWorker|TestNativeControl' ./adapters/native
+        env:
+          RIFFINE_AUDIO_HELPER: ${{ github.workspace }}/build/native-safety/riffine-audio
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
   required:

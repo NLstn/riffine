@@ -23,8 +23,10 @@ func TestMain(m *testing.M) {
 			} else if os.Getenv("RIFFINE_DECODER_TEST_LEGACY_PREVIEW") == "1" {
 				fmt.Print(`{"abi":1,"formats":["wav-pcm","flac","mp3"],"borrowedSources":true}`)
 			} else {
-				fmt.Print(`{"abi":1,"formats":["wav-pcm","flac","mp3"],"borrowedSources":true,"borrowedPreview":true,"borrowedRender":true}`)
+				fmt.Print(`{"abi":1,"formats":["wav-pcm","flac","mp3"],"borrowedSources":true,"borrowedPreview":true,"borrowedRender":true,"scheduledControl":1}`)
 			}
+		case "scheduled-control-handle":
+			serveControlFixture()
 		case "decoder-info-handle":
 			frames := 48000
 			if os.Getenv("RIFFINE_DECODER_TEST_FINAL_WAIT") == "1" {
