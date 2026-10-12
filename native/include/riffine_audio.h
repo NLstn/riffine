@@ -11,6 +11,10 @@ extern "C" {
  * This is not a real-time callback API. */
 int riffine_render(const char *input, const char *output, int64_t start,
   int64_t end, double speed, double semitones, char *error, size_t error_size);
+/* Borrows a read-only encoded resource; decoder teardown does not seek or
+ * close the caller handle. PCM processing is bounded independently of duration. */
+int riffine_render_handle(uint64_t handle,const char *output,int64_t start,
+ int64_t end,double speed,double semitones,char *error,size_t error_size);
 int riffine_play(const char *input, int loop, char *error, size_t error_size);
 #ifdef __cplusplus
 }

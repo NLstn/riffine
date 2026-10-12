@@ -100,6 +100,7 @@ type Service struct {
 	Store           resource.Store
 	Decoder         audio.Decoder
 	Renderer        engine.Renderer
+	SourceRenderer  engine.SourceRenderer
 	Previewer       engine.Previewer
 	SourcePreviewer engine.SourcePreviewer
 	LiveDevice      LiveDeviceFactory
@@ -181,7 +182,7 @@ type Session struct {
 
 func (s *Session) snapshot() Snapshot {
 	snapshot := Snapshot{Version: APIVersion, Sequence: s.sequence, State: "ready", Revision: s.revision, Project: s.p.Clone(),
-		Capabilities: Capabilities{Formats: append([]string{}, s.service.Decoder.Formats()...), OfflineRender: s.service.Renderer != nil, StreamPreview: s.service.Previewer != nil || s.service.SourcePreviewer != nil}}
+		Capabilities: Capabilities{Formats: append([]string{}, s.service.Decoder.Formats()...), OfflineRender: s.service.Renderer != nil || s.service.SourceRenderer != nil, StreamPreview: s.service.Previewer != nil || s.service.SourcePreviewer != nil}}
 	if s.live != nil {
 		transport := s.live.transport.Snapshot()
 		if s.live.dirty {
@@ -436,14 +437,27 @@ func (s *Session) Waveform(ctx context.Context, bins int) (audio.Waveform, error
 func (s *Session) Render(ctx context.Context, destination string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.service.Renderer == nil {
+	if s.service.Renderer == nil && s.service.SourceRenderer == nil {
 		return failure(UnsupportedCapability, errors.New("offline rendering is unavailable"))
 	}
-	if err := s.verify(ctx, s.source); err != nil {
-		return err
-	}
 	start, end := s.selection()
-	err := s.service.Renderer.Render(ctx, engine.RenderRequest{Source: s.source, Destination: destination, StartFrame: start, EndFrame: end, Speed: s.p.Settings.Speed, Pitch: s.p.Settings.Pitch})
+	request := engine.RenderRequest{Source: s.source, Destination: destination, StartFrame: start, EndFrame: end, Speed: s.p.Settings.Speed, Pitch: s.p.Settings.Pitch}
+	var err error
+	if s.service.SourceRenderer != nil {
+		var reader resource.Reader
+		var info audio.Info
+		reader, info, err = s.openVerifiedAudio(ctx, s.source)
+		if err != nil {
+			return err
+		}
+		defer reader.Close()
+		err = s.service.SourceRenderer.RenderSource(ctx, reader, info, request)
+	} else {
+		if err = s.verify(ctx, s.source); err != nil {
+			return err
+		}
+		err = s.service.Renderer.Render(ctx, request)
+	}
 	if err != nil {
 		return failure(HostFailure, err)
 	}

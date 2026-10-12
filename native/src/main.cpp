@@ -20,7 +20,7 @@ int run(int argc, char **argv) {
     if(argc==2 && std::string(argv[1])=="version") {std::puts("riffine-audio ABI 1; Signalsmith Stretch + miniaudio");return 0;}
     int result=1;
     auto operation = argc > 1 ? std::string(argv[1]) : std::string();
-    if(argc==2 && operation=="formats") { std::puts(R"({"abi":1,"formats":["wav-pcm","flac","mp3"],"borrowedSources":true,"borrowedPreview":true})"); return 0; }
+    if(argc==2 && operation=="formats") { std::puts(R"({"abi":1,"formats":["wav-pcm","flac","mp3"],"borrowedSources":true,"borrowedPreview":true,"borrowedRender":true})"); return 0; }
     if((argc==3 && (operation=="decoder-info" || operation=="decoder-info-handle")) || (argc==4 && (operation=="decoder-read" || operation=="decoder-read-handle"))) {
       riffine_decoder *raw=nullptr;
       if(operation=="decoder-info-handle" || operation=="decoder-read-handle"){
@@ -51,8 +51,11 @@ int run(int argc, char **argv) {
       }
       if(std::fflush(stdout)!=0)throw std::runtime_error("cannot flush decoded PCM");return 0;
     }
-    if(argc==8 && std::string(argv[1])=="render") {
-      result=riffine_render(argv[2],argv[3],std::stoll(argv[4]),std::stoll(argv[5]),std::stod(argv[6]),std::stod(argv[7]),error,sizeof(error));
+    if(argc==8 && (operation=="render" || operation=="render-handle")) {
+      if(operation=="render-handle"){
+        std::string value=argv[2];if(value.empty()||value.find_first_not_of("0123456789")!=std::string::npos)throw std::runtime_error("invalid source handle");
+        result=riffine_render_handle(std::stoull(value),argv[3],std::stoll(argv[4]),std::stoll(argv[5]),std::stod(argv[6]),std::stod(argv[7]),error,sizeof(error));
+      }else result=riffine_render(argv[2],argv[3],std::stoll(argv[4]),std::stoll(argv[5]),std::stod(argv[6]),std::stod(argv[7]),error,sizeof(error));
     } else if(argc==8 && (operation=="preview" || operation=="preview-handle")) {
       std::string mode=argv[7];
       if(mode!="system" && mode!="null") throw std::runtime_error("preview mode must be system or null");

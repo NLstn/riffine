@@ -102,8 +102,8 @@ All write commands refuse to replace existing files. Save edits under a new name
   extensible WAV, RF64, MP3 or FLAC import yet, even though miniaudio supports more.
 - Render: PCM16 WAV; independent speed 0.25–2x and pitch ±12 semitones. The chosen
   DSP can introduce artifacts, especially at extreme slowdown and on transients.
-- Native offline processing caps its main input/output float buffers at 256 MiB;
-  select a shorter loop for large tracks. Total process memory is higher.
+- Native offline rendering uses the bounded, latency-trimmed selection kernel
+  with fixed PCM blocks. PCM16 WAV output must fit the standard RIFF size limit.
 - Each render has a 5 ms edge fade (shorter for tiny selections). Loop playback
   avoids hard edges but is not a crossfaded, sample-seamless live loop engine.
 - Waveform data is JSON, not a graphical view. Projects contain metadata and a

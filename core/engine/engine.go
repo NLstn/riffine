@@ -24,6 +24,13 @@ type RenderRequest struct {
 type Renderer interface {
 	Render(context.Context, RenderRequest) error
 }
+
+// SourceRenderer borrows one identity-verified reader for bounded offline render.
+// It closes its own decoder before returning and must refuse existing output.
+type SourceRenderer interface {
+	RenderSource(context.Context, resource.Reader, audio.Info, RenderRequest) error
+}
+
 type Player interface {
 	Play(context.Context, string, bool) error
 }
