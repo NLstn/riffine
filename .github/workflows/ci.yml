@@ -124,8 +124,8 @@ jobs:
             '-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
             '-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
             '-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined'
-          cmake --build build/native-safety --target riffine-scheduled-test riffine-stream-abi-test riffine-presentation-queue-test riffine-device-clock-test riffine-audio --parallel 2
-      - run: ctest --test-dir build/native-safety -R 'bounded-scheduled-worker|streaming-c-abi|native-presentation-queue|native-device-clock' --output-on-failure --no-tests=error
+          cmake --build build/native-safety --target riffine-scheduled-test riffine-stream-abi-test riffine-presentation-queue-test riffine-device-clock-test riffine-rate-selection-test riffine-audio --parallel 2
+      - run: ctest --test-dir build/native-safety -R 'bounded-scheduled-worker|streaming-c-abi|native-presentation-queue|native-device-clock|device-rate-selection-processing' --output-on-failure --no-tests=error
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
