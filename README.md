@@ -10,8 +10,9 @@ songs, saves versioned practice projects, sets independent speed/pitch and A/B
 loops, extracts waveform peaks, renders practice audio through Signalsmith
 Stretch, and plays it through miniaudio.
 
-The browser client indexes local music and supports basic play/pause, seeking
-and track navigation. Practice speed/pitch and loop controls are not connected yet. The current CLI playback renders the selection to a temporary
+The browser client indexes local music and provides a practice workspace for
+PCM WAV, MP3 and FLAC with independent speed/pitch, live A/B looping, waveform
+navigation, named phrases and saved projects. The current CLI playback renders the selection to a temporary
 WAV first; parameters are not changed interactively during playback. The native
 processing layer now also has an experimental [bounded streaming DSP API](native/include/riffine_stream.h)
 and PCM queue. The CLI `preview` command connects these to a native worker and
@@ -98,8 +99,9 @@ All write commands refuse to replace existing files. Save edits under a new name
 
 ## Current limits
 
-- Import: RIFF/WAVE integer PCM 16/24/32-bit, mono/stereo, 8–192 kHz. No float,
-  extensible WAV, RF64, MP3 or FLAC import yet, even though miniaudio supports more.
+- Practice import: RIFF/WAVE integer PCM 16/24/32-bit, MP3 and FLAC,
+  mono/stereo, 8–192 kHz. Float/extensible WAV, RF64, M4A/AAC, OGG/Opus
+  and other library-indexed formats do not yet support practice.
 - Render: PCM16 WAV; independent speed 0.25–2x and pitch ±12 semitones. The chosen
   DSP can introduce artifacts, especially at extreme slowdown and on transients.
 - Native offline rendering uses the bounded, latency-trimmed selection kernel
@@ -158,29 +160,33 @@ See [precise waveform detail](docs/validation/waveform-detail.md).
 
 ### Browser practice workspace
 
-Practice keyboard controls use Space for Play/Pause, R for Restart and S for
-Stop while focus is in the workspace. **Keyboard shortcuts** lets you remap or
-disable them and save preferences locally; typing and native button activation
-retain their usual keys. See [foreground keyboard validation](docs/validation/browser-keyboard-controls.md).
+Build the actual shared core and processing assets (the DSP build requires an
+already activated Emscripten 4.0.14 SDK):
 
-The browser practice workspace also supports live Play/Pause, Stop, Restart and
-Seek for supported WAV sources. Position and completed A/B loops follow the
-shared core's device acknowledgements. Use **Close playback** to return to a
-one-pass preview. See [live session binding and its validation limits](docs/validation/browser-live-binding.md).
+```sh
+sh scripts/build-browser-practice.sh
+sh scripts/build-browser-dsp.sh
+npm --prefix web ci
+npm --prefix web run dev
+```
 
-Build the shared core with `sh scripts/build-browser-practice.sh`, then run
-`npm --prefix web ci` and `npm --prefix web run dev`. Open the localhost URL,
-choose **Open practice workspace → Try generated demo**, and edit a source-time
-phrase, speed/pitch, named loops, notes or markers. Download/reopen projects to
-keep edits. The browser adapter currently supports WAV PCM editing/waveforms;
-practice audio playback is explicitly unavailable. [Validation and remaining
-host work](docs/validation/browser-practice.md).
+Open the localhost URL and choose **Choose music folder → Practice** beside a
+PCM WAV, MP3 or FLAC track. Set **Speed (%)** and **Pitch (semitones)**, then
+**Apply speed / pitch**. Enter selection start/end in source seconds and choose
+**Apply A/B loop → Play**. Click the waveform to set the start and Shift-click
+for the end. Pause, Stop, Restart and Seek use the same live transport; position
+and completed loops follow the shared core's device acknowledgements.
 
+For a quick check, use **Open practice workspace → Try generated MP3 demo**.
+Download/reopen projects with the same original source to keep parameters,
+named phrases, markers, notes and speed ladders. Audio stays on the device;
+no upload, external server or manual conversion is required.
 
-Browser selection preview can use the shared C++ DSP through an AudioWorklet.
-With the existing Emscripten 4.0.14 SDK activated, run
-`sh scripts/build-browser-dsp.sh` as well as the browser core build, then open the
-practice workspace and choose **Preview selection**. It plays the accepted
-selection once at saved speed/pitch; live looping and practice counts remain
-unavailable. See [browser audio preview](docs/validation/browser-audio-preview.md)
-for run steps, host requirements, cancellation and validation evidence.
+Space toggles Play/Pause, R restarts and S stops while focus is in the workspace.
+**Keyboard shortcuts** lets you remap or disable them and save preferences
+locally; typing and native button activation retain their usual keys.
+
+[MP3/FLAC support and validation](docs/validation/browser-codecs.md),
+[live binding](docs/validation/browser-live-binding.md),
+[keyboard controls](docs/validation/browser-keyboard-controls.md) and
+[selection preview](docs/validation/browser-audio-preview.md).

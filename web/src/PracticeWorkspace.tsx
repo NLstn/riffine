@@ -25,7 +25,7 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
  const [previewControlBusy, setPreviewControlBusy] = useState(false);
  const [busyLabel, setBusyLabel] = useState('Working locally…');
  const [error, setError] = useState('');
- const [status, setStatus] = useState('Choose an original WAV and optionally a saved project.');
+ const [status, setStatus] = useState('Choose a WAV, MP3 or FLAC and optionally a saved project.');
  const [start, setStart] = useState('0');
  const [end, setEnd] = useState('0');
  const [speed, setSpeed] = useState('100');
@@ -184,11 +184,11 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
  return <section className="practice-workspace" aria-label="Practice workspace" onKeyDown={keydown}>
   <div className="practice-heading"><div><h2>Practice workspace</h2><p>{snapshot?.project.name ?? 'Open your original audio'}</p></div><button type="button" onClick={onClose}>Close practice</button></div>
   <div className="practice-actions">
-   <button type="button" disabled={busy} onClick={() => sourceInput.current?.click()}>Choose original WAV / relink</button>
+   <button type="button" disabled={busy} onClick={() => sourceInput.current?.click()}>Choose audio / relink</button>
    <button type="button" disabled={busy} onClick={() => void run(async () => {
-    const response = await fetch('/practice/demo.wav'); if (!response.ok) throw new Error('Generated demo is missing; run the browser build script.');
-    const file = new File([await response.blob()], 'demo.wav', { type: 'audio/wav' }); setSelectedSource(file); setProjectFile(undefined); await open(file);
-   })}>Try generated demo</button>
+    const response = await fetch('/practice/demo.mp3'); if (!response.ok) throw new Error('Generated demo is missing; run the browser build script.');
+    const file = new File([await response.blob()], 'demo.mp3', { type: 'audio/mpeg' }); setSelectedSource(file); setProjectFile(undefined); await open(file);
+   })}>Try generated MP3 demo</button>
    <button type="button" disabled={busy} onClick={() => projectInput.current?.click()}>Reopen project</button>
    <button type="button" disabled={busy || !snapshot} onClick={() => void exportProject()}>Download project</button>
    {busy && previewControls && <button type="button" disabled={previewControlBusy} onClick={() => void togglePreview()}>{previewPaused ? 'Resume preview' : 'Pause preview'}</button>}
@@ -202,7 +202,7 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
    <button type="button" onClick={applyShortcuts}>Save shortcuts</button>
    {shortcutWarning && <p role="alert" className="practice-error">{shortcutWarning}</p>}
   </details>
-  <input className="visually-hidden" ref={sourceInput} type="file" accept=".wav,.wave,audio/wav" onChange={event => { chooseSource(event.target.files?.[0]); event.target.value = ''; }} />
+  <input className="visually-hidden" ref={sourceInput} type="file" accept=".wav,.wave,.mp3,.flac,audio/wav,audio/mpeg,audio/flac" onChange={event => { chooseSource(event.target.files?.[0]); event.target.value = ''; }} />
   <input className="visually-hidden" ref={projectInput} type="file" accept=".json,application/json" onChange={event => { loadProject(event.target.files?.[0]); event.target.value = ''; }} />
   {error && <p role="alert" className="practice-error">{error}</p>}<p role="status">{busy ? busyLabel : status}</p>
   {snapshot && <>

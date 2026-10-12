@@ -120,11 +120,15 @@ jobs:
             "-DFETCHCONTENT_SOURCE_DIR_MINIAUDIO=$PWD/build/browser-dsp/_deps/miniaudio-src" \
             "-DFETCHCONTENT_SOURCE_DIR_SIGNALSMITH-LINEAR=$PWD/build/browser-dsp/_deps/signalsmith-linear-src" \
             "-DFETCHCONTENT_SOURCE_DIR_SIGNALSMITH-STRETCH=$PWD/build/browser-dsp/_deps/signalsmith-stretch-src"
-          cmake --build build/rate-selection-native --target riffine-rate-selection-test --parallel 2
+          cmake --build build/rate-selection-native --target riffine-rate-selection-test riffine-audio --parallel 2
           node scripts/check-browser-rate-selection.mjs build/rate-selection-native/riffine-rate-selection-test > build/browser-dsp/rate-selection.json
           node scripts/check-browser-schedules.mjs > build/browser-dsp/schedules.json
           sh scripts/build-browser-practice.sh
           go run ./cmd/riffine tone --out build/browser-conformance.wav --seconds 1
+          node scripts/check-browser-codecs.mjs build/rate-selection-native/riffine-audio > build/browser-dsp/codecs.json
+          RIFFINE_LIVE_SOURCE=native/testdata/generated-stereo.mp3 node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-mp3.json
+          RIFFINE_LIVE_SOURCE=native/testdata/generated-stereo.mp3 RIFFINE_LIVE_PLAN=1 node scripts/check-browser-live-binding.mjs > build/browser-dsp/saved-plan-mp3.json
+          RIFFINE_LIVE_SOURCE=native/testdata/generated-stereo.flac node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-flac.json
           node scripts/check-browser-preview.mjs > build/browser-dsp/preview.json
           node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-binding.json
           RIFFINE_LIVE_ACTIONS=1 node scripts/check-browser-live-binding.mjs > build/browser-dsp/practice-actions.json
@@ -141,6 +145,10 @@ jobs:
             build/wasm-dsp/metrics.json
             build/browser-dsp/metrics.json
             build/browser-dsp/preview.json
+            build/browser-dsp/codecs.json
+            build/browser-dsp/live-mp3.json
+            build/browser-dsp/live-flac.json
+            build/browser-dsp/saved-plan-mp3.json
             build/browser-dsp/schedules.json
             build/browser-dsp/rate-selection.json
             build/browser-dsp/practice-actions.json

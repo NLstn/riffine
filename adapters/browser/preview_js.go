@@ -32,7 +32,7 @@ func (Previewer) PreviewSource(ctx context.Context, reader resource.Reader, info
 	if !PreviewAvailable() {
 		return report, errors.New("browser output preview is unavailable")
 	}
-	pcm, err := (audio.WAVDecoder{}).OpenVerifiedPCM(ctx, reader, info)
+	pcm, err := (Decoder{}).OpenVerifiedPCM(ctx, reader, info)
 	if err != nil {
 		return report, err
 	}

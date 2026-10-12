@@ -101,7 +101,7 @@ func (LiveFactory) OpenLive(ctx context.Context, source practice.VerifiedSource)
 	if !LiveAvailable() {
 		return nil, errors.New("browser live output is unavailable")
 	}
-	pcm, err := (audio.WAVDecoder{}).OpenVerifiedPCM(ctx, source.Reader, source.Info)
+	pcm, err := (Decoder{}).OpenVerifiedPCM(ctx, source.Reader, source.Info)
 	if err != nil {
 		return nil, err
 	}

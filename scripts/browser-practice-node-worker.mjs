@@ -22,6 +22,8 @@ await import(pathToFileURL(workerData.loader));
 let liveReceive;
 if (workerData.preview || workerData.live) {
  globalThis.self = globalThis;
+ const codec = await import('../web/public/practice/codec-port.mjs');
+ globalThis.riffineCodecOpen = codec.openCodec;
  const preview = await import('../web/public/practice/preview-worker.mjs');
  await preview.ready;
  globalThis.riffinePreviewRun = preview.run;

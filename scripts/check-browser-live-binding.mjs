@@ -25,8 +25,8 @@ class Node {
  connect() {} disconnect() {}
 }
 globalThis.AudioWorkletNode = Node;
-let context, host, openingGate, openingEntered;
-const worker = new Worker(new URL('./browser-practice-node-worker.mjs',import.meta.url), {workerData:{source:resolve('build/browser-conformance.wav'),name:'fixture.wav',loader:resolve('web/public/practice/wasm_exec.js'),wasm:resolve('web/public/practice/core.wasm'),live:true}});
+let context, host, openingGate, openingEntered, output;
+const worker = new Worker(new URL('./browser-practice-node-worker.mjs',import.meta.url), {workerData:{source:resolve(process.env.RIFFINE_LIVE_SOURCE ?? 'build/browser-conformance.wav'),name:process.env.RIFFINE_LIVE_SOURCE?.split('/').at(-1) ?? 'fixture.wav',loader:resolve('web/public/practice/wasm_exec.js'),wasm:resolve('web/public/practice/core.wasm'),live:true}});
 let readyResolve,readyReject,next=0,sequence=0,maxRead=0;
 const ready=new Promise((resolve,reject)=>{readyResolve=resolve;readyReject=reject;});
 const pending=new Map();
@@ -35,7 +35,7 @@ async function receiveHost(message) {
  try {
   let result={};
   switch(message.method) {
-  case 'open': if(openingGate){openingEntered();await openingGate;}context=new Context();assert.equal(message.args.sampleRate,context.sampleRate);host=new LiveOutputHost(context,message.args.channels,()=>{});break;
+  case 'open': if(openingGate){openingEntered();await openingGate;}context=new Context();assert.equal(message.args.sampleRate,context.sampleRate);host=new LiveOutputHost(context,message.args.channels,()=>{});output=[Array.from({length:message.args.channels},()=>new Float32Array(128))];break;
   case 'reset': result=await host.reset();break;
   case 'start': await host.start();break;
   case 'suspend': if(host) await host.suspend();break;
@@ -56,7 +56,7 @@ worker.on('message',message=>{
 const call=request=>new Promise((resolve,reject)=>{const id=++next;pending.set(id,{resolve,reject});worker.postMessage({id,request:{version:1,...request},...(request.type==='import'?{file:'source'}:{})});});
 const requireResponse=response=>{assert.equal(response.error,undefined);return response;};
 const command=async fields=>{const response=requireResponse(await call({type:'command',command:{version:1,sequence:sequence+1,...fields}}));sequence=response.snapshot.sequence;return response.snapshot;};
-const output=[[new Float32Array(128)]];
+
 let pumping=false;
 const pump=setInterval(()=>{
  if(!pumping||context?.state!=='running'||!host?.node)return;
