@@ -38,6 +38,7 @@ jobs:
           cache: false
       - run: sh scripts/build-host-spike.sh portable
       - run: RIFFINE_SPIKE_OUT=build/host-spike/ios sh scripts/build-host-spike.sh ios
+      - run: python3 -m unittest discover -s scripts -p 'test_check_ios_spike.py'
       - run: python3 scripts/check-ios-spike.py
       - uses: actions/upload-artifact@v6
         if: always()
@@ -46,6 +47,7 @@ jobs:
           path: |
             build/host-spike/ios/report.json
             build/host-spike/ios/metrics.json
+            build/host-spike/ios/simulator.log
           if-no-files-found: warn
 
   android-runtime:
