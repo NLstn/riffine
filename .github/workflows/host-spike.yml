@@ -123,7 +123,8 @@ jobs:
             "-DFETCHCONTENT_SOURCE_DIR_MINIAUDIO=$PWD/build/browser-dsp/_deps/miniaudio-src" \
             "-DFETCHCONTENT_SOURCE_DIR_SIGNALSMITH-LINEAR=$PWD/build/browser-dsp/_deps/signalsmith-linear-src" \
             "-DFETCHCONTENT_SOURCE_DIR_SIGNALSMITH-STRETCH=$PWD/build/browser-dsp/_deps/signalsmith-stretch-src"
-          cmake --build build/rate-selection-native --target riffine-rate-selection-test riffine-audio --parallel 2
+          cmake --build build/rate-selection-native --target riffine-rate-selection-test riffine-click-test riffine-audio --parallel 2
+          node scripts/check-browser-clicks.mjs build/rate-selection-native/riffine-click-test > build/browser-dsp/clicks.json
           node scripts/check-browser-rate-selection.mjs build/rate-selection-native/riffine-rate-selection-test > build/browser-dsp/rate-selection.json
           node scripts/check-browser-schedules.mjs > build/browser-dsp/schedules.json
           sh scripts/build-browser-practice.sh
@@ -139,6 +140,8 @@ jobs:
           node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-binding.json
           RIFFINE_LIVE_ACTIONS=1 node scripts/check-browser-live-binding.mjs > build/browser-dsp/practice-actions.json
           RIFFINE_LIVE_PLAN=1 node scripts/check-browser-live-binding.mjs > build/browser-dsp/saved-plan.json
+          RIFFINE_LIVE_CUES=1 node scripts/check-browser-live-binding.mjs > build/browser-dsp/cues.json
+          RIFFINE_LIVE_BEATS=1 node scripts/check-browser-live-binding.mjs > build/browser-dsp/beat-markers.json
           RIFFINE_LIVE_SPEED=1 RIFFINE_LIVE_PITCH=0 node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-binding-normal.json
           RIFFINE_LIVE_SPEED=.25 RIFFINE_LIVE_PITCH=-12 node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-binding-min.json
           RIFFINE_LIVE_SPEED=2 RIFFINE_LIVE_PITCH=12 node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-binding-max.json
@@ -160,8 +163,11 @@ jobs:
             build/browser-dsp/saved-plan-opus.json
             build/browser-dsp/schedules.json
             build/browser-dsp/rate-selection.json
+            build/browser-dsp/clicks.json
             build/browser-dsp/practice-actions.json
             build/browser-dsp/saved-plan.json
+            build/browser-dsp/cues.json
+            build/browser-dsp/beat-markers.json
             build/browser-dsp/live-binding.json
             build/browser-dsp/live-binding-normal.json
             build/browser-dsp/live-binding-min.json

@@ -19,7 +19,15 @@ globalThis.FileReaderSync = class {
 };
 globalThis.postMessage = data => parentPort.postMessage({ ...data, reads, maxRead });
 await import(pathToFileURL(workerData.loader));
-let liveReceive;
+let liveReceive, projectStore;
+if (workerData.storage) {
+ const {createRequire} = await import('node:module');
+ const require = createRequire(new URL('../web/package.json',import.meta.url));
+ globalThis.indexedDB = new (require('fake-indexeddb').IDBFactory)();
+ const store = await import('../web/public/practice/project-store.mjs');
+ projectStore = store.projectStore;
+ globalThis.riffineProjectStoreRun = store.runProjectStore;
+}
 if (workerData.codecs || workerData.preview || workerData.live) {
  globalThis.self = globalThis;
  const codec = await import('../web/public/practice/codec-port.mjs');
@@ -36,11 +44,13 @@ const go = new globalThis.Go();
 const { instance } = await WebAssembly.instantiate(await readFile(workerData.wasm), go.importObject);
 void go.run(instance).catch(error => { throw error; });
 parentPort.on('message', data => {
+ if (data.type === 'host_store') { void projectStore[data.method](...data.args).then(result => parentPort.postMessage({type:'storage_result',id:data.id,result}), error => parentPort.postMessage({type:'storage_result',id:data.id,error:error.message})); return; }
  if (liveReceive?.(data)) return;
  if (data.request?.type === 'preview') globalThis.riffinePreviewQueue = data.queue;
  if (data.type === 'cancel') { globalThis.riffinePracticeCancel(); return; }
  let file;
  if (data.file === 'source') file = new LocalFile(bytes);
+ if (data.file === 'changed') {const changed = bytes.slice(); changed[changed.length-1] ^= 1; file = new LocalFile(changed);}
  if (data.file === 'large') {
   const header = bytes.slice(0, 44);
   const size = 32 * 1024 * 1024;

@@ -3,6 +3,7 @@ import type { ChangeEvent } from 'react';
 import { chooseFolder, formatDuration, formatSize, indexFiles } from './library';
 import type { MusicTrack } from './library';
 import PracticeWorkspace from './PracticeWorkspace';
+import OfflineStatus from './OfflineStatus';
 
 type Phase = 'idle' | 'indexing' | 'ready';
 
@@ -314,6 +315,7 @@ function App() {
           </>
         )}
 
+        <OfflineStatus />
         <footer className="page-footer"><span>Made for the moments between play and replay.</span><span>RIFFINE <span className="footer-accent">●</span> PRE-ALPHA</span></footer>
       </main>
       <audio

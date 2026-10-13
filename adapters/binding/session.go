@@ -13,6 +13,7 @@ import (
 	"github.com/NLstn/riffine/core/engine"
 	"github.com/NLstn/riffine/core/practice"
 	"github.com/NLstn/riffine/core/project"
+	"github.com/NLstn/riffine/core/resource"
 	"github.com/NLstn/riffine/core/waveform"
 )
 
@@ -30,13 +31,14 @@ type Request struct {
 	Bins       int             `json:"bins,omitempty"`
 }
 type Response struct {
-	Version  int                   `json:"version"`
-	Preview  *engine.PreviewReport `json:"preview,omitempty"`
-	Snapshot *practice.Snapshot    `json:"snapshot,omitempty"`
-	Events   *practice.EventBatch  `json:"events,omitempty"`
-	Window   *waveform.Window      `json:"window,omitempty"`
-	Document string                `json:"document,omitempty"`
-	Error    *practice.Error       `json:"error,omitempty"`
+	Version  int                    `json:"version"`
+	Preview  *engine.PreviewReport  `json:"preview,omitempty"`
+	Snapshot *practice.Snapshot     `json:"snapshot,omitempty"`
+	Events   *practice.EventBatch   `json:"events,omitempty"`
+	Window   *waveform.Window       `json:"window,omitempty"`
+	Document string                 `json:"document,omitempty"`
+	Saved    *resource.UpdateResult `json:"saved,omitempty"`
+	Error    *practice.Error        `json:"error,omitempty"`
 }
 type Session struct {
 	mu      sync.Mutex
@@ -90,8 +92,11 @@ func (s *Session) Handle(ctx context.Context, data []byte) Response {
 		return reject(&practice.Error{Version: practice.APIVersion, Code: practice.UnsupportedVersion, Message: "unsupported binding version"})
 	}
 
-	if request.Type != "import" && request.Type != "open" && (request.Source != "" || request.Document != "") {
-		return invalid("resource handles are only valid for import/open")
+	if request.Type != "import" && request.Type != "open" && request.Source != "" {
+		return invalid("source handles are only valid for import/open")
+	}
+	if request.Type != "import" && request.Type != "open" && request.Type != "save_as" && request.Document != "" {
+		return invalid("document handles are only valid for import/open/save_as")
 	}
 	if request.Type != "command" && len(request.Command) != 0 {
 		return invalid("command payload is only valid for command")
@@ -172,6 +177,19 @@ func (s *Session) Handle(ctx context.Context, data []byte) Response {
 			return reject(err)
 		}
 		response.Document = string(data)
+	case "save_as":
+		if request.Document == "" {
+			return invalid("a save destination is required")
+		}
+		if err := s.session.SaveAs(ctx, request.Document); err != nil {
+			return reject(err)
+		}
+	case "save":
+		result, err := s.session.Save(ctx)
+		if err != nil {
+			return reject(err)
+		}
+		response.Saved = &result
 	case "waveform":
 		info := s.session.Snapshot().Project.Track.Audio
 		if request.StartFrame < 0 || request.EndFrame <= request.StartFrame || request.EndFrame > info.Frames || request.Bins < 1 || request.Bins > waveform.MaxWindowBins {

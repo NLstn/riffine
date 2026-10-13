@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strings"
 	"sync"
 	"syscall/js"
 	"time"
@@ -62,13 +63,28 @@ func (f *Files) Read(ctx context.Context, document string, max int) ([]byte, err
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if strings.HasPrefix(document, "browser:") {
+		value, err := f.storeCall(ctx, "read", document, "", nil)
+		if err != nil {
+			return nil, err
+		}
+		data := []byte(value.Get("document").String())
+		if len(data) == 0 || len(data) > max {
+			return nil, errors.New("project missing or oversized")
+		}
+		return data, nil
+	}
 	if len(f.document) == 0 || len(f.document) > max {
 		return nil, errors.New("project missing or oversized")
 	}
 	return bytes.Clone(f.document), nil
 }
-func (f *Files) Create(context.Context, string, []byte) error {
-	return errors.New("browser exports a new project download; direct file creation is unavailable")
+func (f *Files) Create(ctx context.Context, document string, data []byte) error {
+	if !strings.HasPrefix(document, "browser:") {
+		return errors.New("downloaded projects are read-only; save a device copy")
+	}
+	_, err := f.storeCall(ctx, "create", document, "", data)
+	return err
 }
 
 type fileReader struct {

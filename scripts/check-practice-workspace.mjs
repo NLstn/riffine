@@ -48,7 +48,7 @@ try {
   const root=createRoot(document.getElementById('root'));
   try {
    await React.act(async()=>root.render(React.createElement(React.StrictMode,null,
-    React.createElement(PracticeWorkspace,{source:file,onClose(){},createFacade}))));
+    React.createElement(PracticeWorkspace,{source:file,onClose(){},createFacade,createStorage:async()=>({list:async()=>[]})}))));
    assert.equal(clients.length,2,'Strict Mode did not replay workspace effects');
    const [disposed,active]=clients;
    assert.equal(disposed.disposals,1);

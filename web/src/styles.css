@@ -239,3 +239,15 @@ tbody tr:hover .track-number > span, .track-play-button.is-playing + span { disp
 .practice-shortcuts summary { cursor: pointer; }
 .practice-shortcuts p { max-width: 68ch; font-size: 13px; }
 .practice-shortcuts select { padding: 8px; border: 1px solid #9aa79d; border-radius: 6px; background: white; color: #203b2b; }
+
+.practice-waveform { touch-action: none; user-select: none; }
+.practice-waveform-selection { fill: currentColor; opacity: .14; }
+.practice-waveform-handle { cursor: ew-resize; }
+.practice-waveform-handle:focus { outline: none; color: #173f83; }
+.practice-waveform-handle:focus rect:first-child { fill: currentColor; fill-opacity: .2; stroke: currentColor; stroke-width: 2; }
+.practice-waveform-handle-label { fill: #fff; font-size: 16px; font-weight: 700; pointer-events: none; }
+.offline-status { color: var(--muted, #aaa); font-size: .875rem; }
+
+.practice-cues { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 12px; border: 1px solid #9aa79d; border-radius: 8px; padding: 12px; }
+.practice-cues legend { font-weight: 600; padding: 0 6px; }
+.practice-cues p { flex-basis: 100%; margin: 4px 0; }

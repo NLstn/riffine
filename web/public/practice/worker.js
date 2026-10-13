@@ -3,6 +3,7 @@ const diagnosticPrefix = `[riffine:practice-worker:${self.name || 'unnamed'}]`;
 console.info(`${diagnosticPrefix} loading runtime`);
 importScripts('./wasm_exec.js');
 const go = new Go();
+const storeReady = import('./project-store.mjs');
 const codecReady = import('./codec-port.mjs');
 let liveReceive;
 self.onmessage = (event) => {
@@ -22,6 +23,7 @@ self.onmessage = (event) => {
   try {
     // Editing remains available when optional compiled processing assets are absent.
     try { const preview = await import('./preview-worker.mjs'); await preview.ready; self.riffineCodecOpen = (await codecReady).openCodec; self.riffinePreviewRun = preview.run; const live = await import('./live-worker.mjs'); liveReceive = live.receive; self.riffineLiveOpen = live.open; console.info(`${diagnosticPrefix} processing assets ready`); } catch (error) { self.riffinePreviewRun = undefined; console.warn(`${diagnosticPrefix} processing assets unavailable`, error); }
+    self.riffineProjectStoreRun = (await storeReady).runProjectStore;
     await codecReady;
     console.info(`${diagnosticPrefix} loading shared core`);
     const response = await fetch('./core.wasm');

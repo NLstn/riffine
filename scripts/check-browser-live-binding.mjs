@@ -5,7 +5,9 @@ import { Worker } from 'node:worker_threads';
 import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { LiveOutputHost } from '../web/public/practice/live-output-host.mjs';
-const planMode=process.env.RIFFINE_LIVE_PLAN === '1';
+const beatMode=process.env.RIFFINE_LIVE_BEATS === '1';
+const cueMode=process.env.RIFFINE_LIVE_CUES === '1'||beatMode;
+const planMode=process.env.RIFFINE_LIVE_PLAN === '1'||cueMode;
 const actionMode=process.env.RIFFINE_LIVE_ACTIONS === '1';
 const speed=Number(process.env.RIFFINE_LIVE_SPEED ?? '.75');
 const pitch=Number(process.env.RIFFINE_LIVE_PITCH ?? '3');
@@ -101,6 +103,41 @@ try {
   assert.equal(saved.settings.speed,1);assert.equal(saved.settings.pitch,0);assert.equal(saved.settings.loop.enabled,false);assert.equal(saved.annotations.notes,'Keep notes');assert.deepEqual(saved.practicePlans,[definition]);
   response=requireResponse(await call({type:'detach_transport'}));sequence=response.snapshot.sequence;assert.equal(context.closes,1);
   console.log(JSON.stringify({actualGoLiveFactory:true,actualCPPWASM:true,acknowledgedACapture:true,BCaptureSourceFrame:36000,rewindPreservesPause:true,boundedOneSecondSeeks:true,regionOrderAndPlayingState:true,fivePointSpeedSteps:true,stepPausesLadder:true,resetPreservesDefinitions:true,deviceClockIsSynthetic:true},null,2));
+ } else if(cueMode){
+  await command({type:'set_annotations',annotations:{regions:[{id:'phrase',label:'Phrase',start:0,end:.1}],...(beatMode?{markers:Array.from({length:5},(_,i)=>({id:`beat-${i}`,kind:'beat',label:`Beat ${i+1}`,position:i/4,measure:Math.floor(i/4)+1,beat:i%4+1}))}:{})}});
+  const cues={version:1,countInBeats:2,restSeconds:.25,clickLevel:.7,metronome:true,grid:{version:1,sourceBPM:240,beatsPerBar:4}};
+  if(beatMode){cues.grid={version:1,beatsPerBar:4};cues.useBeatMarkers=true;}
+  const definition={id:'ladder',label:'Cued 60–100',regionId:'phrase',ladder:{startSpeed:.6,targetSpeed:1,incrementPoints:5,loopsPerStep:4,endBehavior:'stop'},cues};
+  await command({type:'set_practice_plans',practicePlans:[definition]});
+  response=requireResponse(await call({type:'attach_transport'}));sequence=response.snapshot.sequence;
+  assert.equal(response.snapshot.capabilities.practiceCues,true);assert.equal(response.snapshot.capabilities.metronome,true);
+  await command({type:'select_practice_plan',planId:'ladder'});
+  let snapshot=await command({type:'play'});
+  assert.equal(snapshot.transport.phase,'count_in');assert.equal(snapshot.transport.phaseRemainingFrames,40000);assert.equal(snapshot.transport.completedLoops,0);
+  pumping=true;
+  const waitPhase=async(phase,full)=>{const deadline=performance.now()+10000;for(;;){const s=requireResponse(await call({type:'poll_transport'})).snapshot;assert(performance.now()<deadline);if(s.transport.phase===phase&&s.transport.phaseRemainingFrames<full&&s.transport.phaseRemainingFrames>0)return s;await delay(10);}};
+  await waitPhase('count_in',40000);snapshot=await command({type:'pause'});pumping=false;
+  assert.equal(snapshot.transport.phase,'count_in');const countRemaining=snapshot.transport.phaseRemainingFrames;
+  assert(countRemaining>0&&countRemaining<40000);assert.equal(snapshot.transport.plan.completedLoops,0);
+  await delay(20);const frozenCount=requireResponse(await call({type:'poll_transport'})).snapshot;assert.equal(frozenCount.transport.phaseRemainingFrames,countRemaining);
+  snapshot=await command({type:'play'});assert.equal(snapshot.transport.phaseRemainingFrames,countRemaining);pumping=true;
+  snapshot=await waitPhase('rest',12000);assert.equal(snapshot.transport.completedLoops,1);snapshot=await command({type:'pause'});pumping=false;
+  const restRemaining=snapshot.transport.phaseRemainingFrames;assert(restRemaining>0&&restRemaining<12000);assert.equal(snapshot.transport.phase,'rest');
+  await delay(20);assert.equal(requireResponse(await call({type:'poll_transport'})).snapshot.transport.phaseRemainingFrames,restRemaining);
+  snapshot=await command({type:'play'});assert.equal(snapshot.transport.phaseRemainingFrames,restRemaining);pumping=true;
+  const completed=[],phases=[];
+  for(let ordinal=1;ordinal<=36;ordinal++){
+   snapshot=await loops(ordinal);const batch=requireResponse(await call({type:'events'})).events;assert.equal(batch.dropped,0);
+   completed.push(...batch.events.filter(event=>event.type==='traversal_completed').map(event=>event.transport));
+   phases.push(...batch.events.filter(event=>event.type==='phase_completed').map(event=>event.transport));
+  }
+  assert.equal(snapshot.state,'stopped');assert.equal(snapshot.transport.plan.completedLoops,36);assert.equal(snapshot.transport.phase,undefined);
+  assert.equal(completed.length,36);assert.equal(phases.filter(event=>event.phase==='count_in').length,1);
+  const rests=phases.filter(event=>event.phase==='rest');assert.equal(rests.length,35);rests.forEach(event=>assert.equal(event.phaseFrames,12000));
+  const expectedSpeeds=[.6,.65,.7,.75,.8,.85,.9,.95,1];completed.forEach((event,index)=>{assert.equal(event.completedLoops,index+1);assert.equal(event.speed,expectedSpeeds[Math.floor(index/4)]);});
+  const exported=JSON.parse(requireResponse(await call({type:'export'})).document);assert.equal(exported.version,5);assert.deepEqual(exported.practicePlans[0].cues,cues);assert.equal(exported.transport,undefined);
+  response=requireResponse(await call({type:'detach_transport'}));sequence=response.snapshot.sequence;assert.equal(context.closes,1);
+  console.log(JSON.stringify({actualGoLiveFactory:true,actualCPPWASM:true,countInDoesNotAdvanceLoops:true,restDoesNotAdvanceLoops:true,pauseRetainsCountInFrames:countRemaining,pauseRetainsRestFrames:restRemaining,presentedLoops:completed.length,fixedRestFrames:12000,completedRestPhases:rests.length,metronomeFromCoreWindows:true,sourceBPM:240,savedBeatMarkers:beatMode,cuesRoundTrip:true,deviceClockIsSynthetic:true},null,2));
  } else if (planMode) {
   await command({type:'set_annotations',annotations:{regions:[{id:'phrase',label:'Phrase',start:.25,end:.75}]}});
   const definition={id:'ladder',label:'60–100',regionId:'phrase',ladder:{startSpeed:.6,targetSpeed:1,incrementPoints:5,loopsPerStep:4,endBehavior:'stop'}};

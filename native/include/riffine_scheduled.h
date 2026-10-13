@@ -2,6 +2,7 @@
 #define RIFFINE_SCHEDULED_H
 #include <stddef.h>
 #include <stdint.h>
+#include "riffine_click.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -37,6 +38,12 @@ int riffine_scheduled_output_rate_get(const riffine_scheduled_worker *,uint32_t 
 int riffine_scheduled_info_get(const riffine_scheduled_worker *,riffine_scheduled_info *,char *,size_t);
 int riffine_scheduled_reset(riffine_scheduled_worker *,uint64_t generation,char *,size_t);
 int riffine_scheduled_submit(riffine_scheduled_worker *,const riffine_schedule *,char *,size_t);
+/* Finite non-audio output phase: kind 1=count-in, 2=rest. Source range is an
+ * equal start/end anchor; output duration plus offset <=120 device seconds.
+ * Events are copied (max32), sorted, original cue coordinates. Offset preserves
+ * click phase across pause/resume. Rest requires no events and level zero. */
+int riffine_scheduled_submit_cue(riffine_scheduled_worker *,const riffine_schedule *,
+ uint32_t kind,uint64_t offset,float level,const riffine_click_event *,uint32_t count,char *,size_t);
 /* Zero frames with success means no scheduled selection, never silent repetition.
  * Blocks stay within one schedule. generated_complete is a DSP diagnostic and
  * cannot be used as a device presentation acknowledgement. Output/result do not

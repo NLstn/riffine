@@ -41,6 +41,7 @@ type ScheduledWorker struct {
 	requestID  uint64
 	info       audio.Info
 	outputRate int
+	cues       bool
 }
 
 func (a Adapter) OpenScheduledWorker(ctx context.Context, reader resource.Reader, info audio.Info) (*ScheduledWorker, error) {
@@ -92,7 +93,7 @@ func (a Adapter) OpenScheduledWorkerRate(ctx context.Context, reader resource.Re
 		cancel()
 		return nil, err
 	}
-	worker := &ScheduledWorker{cmd: cmd, input: input, output: output, cancel: cancel, info: info, outputRate: info.SampleRate}
+	worker := &ScheduledWorker{cmd: cmd, input: input, output: output, cancel: cancel, info: info, outputRate: info.SampleRate, cues: decoder.scheduledCues == 1}
 	worker.mu.Lock()
 	_, err = worker.exchangeLocked(ctx, [16]uint64{3: 1})
 	if err == nil && outputRate != info.SampleRate {
@@ -122,6 +123,9 @@ func (w *ScheduledWorker) shutdownLocked(cause error) {
 	w.output.Close()
 }
 func (w *ScheduledWorker) exchangeLocked(ctx context.Context, q [16]uint64) (WorkerInfo, error) {
+	return w.exchangePayloadLocked(ctx, q, nil)
+}
+func (w *ScheduledWorker) exchangePayloadLocked(ctx context.Context, q [16]uint64, payload []byte) (WorkerInfo, error) {
 	var info WorkerInfo
 	if err := ctx.Err(); err != nil {
 		return info, err
@@ -146,6 +150,13 @@ func (w *ScheduledWorker) exchangeLocked(ctx context.Context, q [16]uint64) (Wor
 	written, err := w.input.Write(request[:])
 	if err == nil && written != len(request) {
 		err = io.ErrShortWrite
+	}
+	if err == nil && len(payload) > 0 {
+		var n int
+		n, err = w.input.Write(payload)
+		if err == nil && n != len(payload) {
+			err = io.ErrShortWrite
+		}
 	}
 	if err == nil {
 		_, err = io.ReadFull(w.output, reply[:])
@@ -207,7 +218,7 @@ func (w *ScheduledWorker) exchangeLocked(ctx context.Context, q [16]uint64) (Wor
 	if end != 0 {
 		return protocolError("unexpected native control error")
 	}
-	if (q[3] == 2 && (info.Generation != q[4] || info.Pending != 0)) || (q[3] == 3 && (info.Generation != q[4] || info.LastSequence != q[5] || info.Pending < 1)) {
+	if (q[3] == 2 && (info.Generation != q[4] || info.Pending != 0)) || ((q[3] == 3 || q[3] == 6) && (info.Generation != q[4] || info.LastSequence != q[5] || info.Pending < 1)) {
 		return protocolError("native control schedule/reset result is inconsistent")
 	}
 	w.outputRate = info.OutputRate
@@ -233,6 +244,38 @@ func (w *ScheduledWorker) Submit(ctx context.Context, s engine.Schedule) error {
 	if s.StartFrame < 0 || s.EndFrame < 0 || s.OutputStart < 0 || s.OutputEnd < 0 || s.EdgeFadeFrames < 0 {
 		return errors.New("negative native schedule coordinate")
 	}
+	if s.BeatGrid != nil {
+		return errors.New("native control worker does not support metronome beat windows")
+	}
+	if !s.Audio() {
+		if !w.cues {
+			return errors.New("native cue scheduling is unsupported; rebuild the helper")
+		}
+		if s.CueOffsetFrames < 0 || len(s.Clicks) > 32 || s.StartFrame != s.EndFrame || s.EdgeFadeFrames != 0 {
+			return errors.New("invalid native cue offset or click count")
+		}
+		kind := uint64(0)
+		switch s.Phase {
+		case "count_in":
+			kind = 1
+		case "rest":
+			kind = 2
+		default:
+			return errors.New("unsupported native cue phase")
+		}
+		payload := make([]byte, len(s.Clicks)*16)
+		for i, click := range s.Clicks {
+			if click.OutputFrame < 0 {
+				return errors.New("negative cue click position")
+			}
+			binary.LittleEndian.PutUint64(payload[i*16:], uint64(click.OutputFrame))
+			if click.Accent {
+				binary.LittleEndian.PutUint64(payload[i*16+8:], 1)
+			}
+		}
+		_, err := w.exchangePayloadLocked(ctx, [16]uint64{3: 6, 4: s.Generation, 5: s.Sequence, 6: uint64(s.StartFrame), 7: uint64(s.CueOffsetFrames), 8: uint64(s.OutputStart), 9: uint64(s.OutputEnd), 10: uint64(s.EdgeFadeFrames), 11: math.Float64bits(s.Speed), 12: math.Float64bits(s.Pitch), 13: kind, 14: uint64(len(s.Clicks)), 15: math.Float64bits(s.ClickLevel)}, payload)
+		return err
+	}
 	_, err := w.exchangeLocked(ctx, [16]uint64{3: 3, 4: s.Generation, 5: s.Sequence, 6: uint64(s.StartFrame), 7: uint64(s.EndFrame), 8: uint64(s.OutputStart), 9: uint64(s.OutputEnd), 10: uint64(s.EdgeFadeFrames), 11: math.Float64bits(s.Speed), 12: math.Float64bits(s.Pitch)})
 	return err
 }
@@ -244,3 +287,6 @@ func (w *ScheduledWorker) Close() error {
 	w.shutdownLocked(errors.New("native scheduled worker is closed"))
 	return nil
 }
+
+// Immutable negotiated capability; this worker still cannot acknowledge audio.
+func (w *ScheduledWorker) SupportsCues() bool { return w.cues }

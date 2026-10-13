@@ -2,10 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
 import { loadShortcuts, saveShortcuts, shortcutKeys, shortcutActions, matchShortcut } from './practice-shortcuts';
 import PracticePlans from './PracticePlans';
+import PracticeWaveform from './PracticeWaveform';
+import { deviceProjects } from './practice-storage';
+import type { ProjectStorage, SavedProject } from './practice-storage';
 import { BrowserPractice, presentationSnapshot, practiceActionLabels } from './practice';
 import type { EditCommand, LiveCommand, PracticeFacade, PracticeResponse, Snapshot, WaveWindow } from './practice';
 
-export default function PracticeWorkspace({ source, onClose, createFacade = () => new BrowserPractice() }: { source?: File; onClose: () => void; createFacade?: () => PracticeFacade }) {
+export default function PracticeWorkspace({ source, onClose, createFacade = () => new BrowserPractice(), createStorage = deviceProjects }: { source?: File; onClose: () => void; createFacade?: () => PracticeFacade; createStorage?: () => Promise<ProjectStorage> }) {
  const facade = useRef<PracticeFacade | null>(null);
  const operation = useRef(false);
  const [loadedShortcuts] = useState(loadShortcuts);
@@ -16,6 +19,11 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
  const projectInput = useRef<HTMLInputElement>(null);
  const [selectedSource, setSelectedSource] = useState(source);
  const [projectFile, setProjectFile] = useState<File>();
+ const [localProject, setLocalProject] = useState<SavedProject>();
+ const [savedProjects, setSavedProjects] = useState<SavedProject[]>([]);
+ const [storageWarning, setStorageWarning] = useState('');
+ const localSourceInput = useRef<HTMLInputElement>(null);
+ const pendingLocalProject = useRef<SavedProject | undefined>(undefined);
  const [sourceSession, setSourceSession] = useState(0);
  const [snapshot, setSnapshot] = useState<Snapshot>();
  const [wave, setWave] = useState<WaveWindow>();
@@ -32,9 +40,13 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
  const [pitch, setPitch] = useState('0');
  const [seekSeconds, setSeekSeconds] = useState('0');
  const [label, setLabel] = useState('Phrase');
+ const [selectedRegion, setSelectedRegion] = useState<string>();
  const [notes, setNotes] = useState('');
  const [phraseNotes, setPhraseNotes] = useState('');
  const [markerLabel, setMarkerLabel] = useState('Section');
+ const [markerKind,setMarkerKind]=useState<'section'|'measure'|'beat'>('section');
+ const [markerMeasure,setMarkerMeasure]=useState('1');
+ const [markerBeat,setMarkerBeat]=useState('1');
  const [detailView, setDetailView] = useState(false);
  const install = (response: PracticeResponse, syncForms = false) => {
   if (response.snapshot) {
@@ -60,20 +72,27 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
    setError(errorMessage); setStatus(errorMessage.startsWith('cancelled:') ? 'Operation cancelled.' : 'Operation could not finish.');
   } finally { if (facade.current === client) { operation.current = false; setBusy(false); } }
  };
- const open = async (original: File, saved?: File) => {
+ const open = async (original: File, saved?: File, local?: SavedProject) => {
   const client = facade.current;
   if (!client) return;
-  setWave(undefined); setDetailView(false);
-  const opened = await client.open(original, saved);
+  if (local && !client.openLocal) throw new Error('Device projects are unavailable in this host. Reopen a downloaded project.');
+  const opened = local ? await client.openLocal!(original, local.id) : await client.open(original, saved);
   if (facade.current !== client) return;
   const result = install(opened, true);
+  setWave(undefined); setDetailView(false); setSelectedRegion(undefined); setLabel('Phrase'); setPhraseNotes('');
+  setSelectedSource(original); setProjectFile(saved); setLocalProject(local);
   if (result.snapshot) {
    const waveform = await client.waveform(0, result.snapshot.project.track.audio.frames);
    if (facade.current !== client) return;
    install(waveform, false);
-   setStatus(saved ? 'Saved project reopened and original identity verified.' : 'Original fingerprinted. Practice changes stay local.');
+   setStatus(saved || local ? 'Saved project reopened and original identity verified.' : 'Original fingerprinted. Practice changes stay local.');
   }
  };
+ useEffect(() => {
+  let active = true;
+  void createStorage().then(store => store.list()).then(items => { if (active) setSavedProjects(items); }).catch(failure => { if (active) setStorageWarning(String(failure instanceof Error ? failure.message : failure)); });
+  return () => { active = false; };
+ }, []);
  useEffect(() => {
   let client: PracticeFacade;
   try { client = createFacade(); }
@@ -149,7 +168,7 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
  });
  const edit = (command: EditCommand) => run(async () => {
   if (!facade.current || !snapshot) return;
-  install(await facade.current.command(snapshot, command)); setStatus('Changes applied by the shared core. Download the project to keep them.');
+  install(await facade.current.command(snapshot, command)); setStatus('Changes applied by the shared core. Save on this device or download the project to keep them.');
  });
  const parameters = (event: FormEvent) => { event.preventDefault(); void edit({ type: 'set_parameters', speed: Number(speed) / 100, pitch: Number(pitch) }); };
  const loop = (enabled: boolean) => edit({ type: 'set_loop', loop: { enabled, start: Number(start), end: Number(end) } });
@@ -159,8 +178,38 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
   const regionId = `region-${crypto.randomUUID()}`;
   void edit({ type: 'set_annotations', annotations: { ...annotations, regions: [...(annotations.regions ?? []), { id: regionId, label, start: Number(start), end: Number(end), notes: phraseNotes }], loops: [...(annotations.loops ?? []), { id: `loop-${crypto.randomUUID()}`, label, regionId }] } });
  };
+ const updatePhrase = () => {
+  if (!selectedRegion) return;
+  void edit({type:'set_annotations',annotations:{...annotations,
+   regions:annotations.regions?.map(region => region.id === selectedRegion ? {...region,label,start:Number(start),end:Number(end),notes:phraseNotes} : region),
+   loops:annotations.loops?.map(loop => loop.regionId === selectedRegion ? {...loop,label} : loop),
+  }});
+ };
+ const deletePhrase = () => {
+  if (!selectedRegion) return;
+  void edit({type:'set_annotations',annotations:{...annotations,
+   regions:annotations.regions?.filter(region => region.id !== selectedRegion),
+   loops:annotations.loops?.filter(loop => loop.regionId !== selectedRegion),
+  }});
+ };
  const loadProject = (file?: File) => { if (!file) return; setProjectFile(file); if (selectedSource) void run(() => open(selectedSource, file)); };
- const chooseSource = (file?: File) => { if (!file) return; setSelectedSource(file); void run(() => open(file, projectFile)); };
+ const chooseSource = (file?: File) => { if (!file) return; void run(() => open(file, projectFile, localProject)); };
+ const refreshSaved = async () => { setSavedProjects(await (await createStorage()).list()); setStorageWarning(''); };
+ const saveDevice = (copy = false) => run(async () => {
+  if (!facade.current?.saveLocal) return;
+  const result = install(await facade.current.saveLocal(copy));
+  setStatus(result.saved ? 'Project saved on this device. The previous version is available below.' : 'A new project copy was saved on this device. Reopen it below with the original audio to edit that saved copy.');
+  try { await refreshSaved(); } catch (failure) { setStorageWarning(String(failure instanceof Error ? failure.message : failure)); }
+ }, 'Saving project on this device…');
+ const chooseLocalOriginal = (item: SavedProject) => { pendingLocalProject.current = item; localSourceInput.current?.click(); };
+ const reopenDevice = (item: SavedProject) => {
+  if (selectedSource) void run(() => open(selectedSource, undefined, item), 'Verifying original audio and reopening device project…');
+  else chooseLocalOriginal(item);
+ };
+ const removeDevice = (item: SavedProject) => run(async () => {
+  await (await createStorage()).remove(item.id); await refreshSaved();
+  setStatus('Saved project and its recovery copies removed from this device.');
+ }, 'Removing device project…');
  const exportProject = () => run(async () => {
   if (!facade.current) return;
   const result = install(await facade.current.exportProject());
@@ -198,16 +247,6 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
   finally { setPreviewControlBusy(false); }
  };
  const duration = snapshot ? snapshot.project.track.audio.frames / snapshot.project.track.audio.sampleRate : 0;
- const viewStart = wave?.requestedStart ?? 0;
- const viewEnd = wave?.requestedEnd ?? 1;
- const viewLength = viewEnd - viewStart;
- const selectInView = (event: React.MouseEvent<SVGSVGElement>) => {
-  if (!wave) return;
-  const rect = event.currentTarget.getBoundingClientRect();
-  const frame = viewStart + Math.round(((event.clientX - rect.left) / rect.width) * viewLength);
-  const value = String(frame / wave.sampleRate);
-  if (event.shiftKey) setEnd(value); else setStart(value);
- };
  return <section className="practice-workspace" aria-label="Practice workspace" onKeyDown={keydown}>
   <div className="practice-heading"><div><h2>Practice workspace</h2><p>{snapshot?.project.name ?? 'Open your original audio'}</p></div><button type="button" onClick={onClose}>Close practice</button></div>
   <div className="practice-actions">
@@ -218,9 +257,24 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
    })}>Try generated MP3 demo</button>
    <button type="button" disabled={busy} onClick={() => projectInput.current?.click()}>Reopen project</button>
    <button type="button" disabled={busy || !snapshot} onClick={() => void exportProject()}>Download project</button>
+   {facade.current?.saveLocal && <button type="button" disabled={busy || !snapshot} onClick={() => void saveDevice()}>Save on this device</button>}
+   {localProject && facade.current?.saveLocal && <button type="button" disabled={busy || !snapshot} onClick={() => void saveDevice(true)}>Save a new device copy</button>}
    {busy && previewControls && <button type="button" disabled={previewControlBusy} onClick={() => void togglePreview()}>{previewPaused ? 'Resume preview' : 'Pause preview'}</button>}
    {busy && <button type="button" onClick={() => facade.current?.cancel()}>Cancel operation</button>}
   </div>
+  <details className="practice-shortcuts" open={!snapshot}>
+   <summary>Projects saved on this device ({savedProjects.filter(item => !item.recoveryOf).length})</summary>
+   <p>These copies contain your settings, phrases, notes and plans. Choose the matching original audio when reopening; audio is never stored here. Download a project to keep a portable backup. Clearing browser data removes device copies.</p>
+   {storageWarning && <p role="alert" className="practice-error">{storageWarning}</p>}
+   <button type="button" disabled={busy} onClick={() => void run(refreshSaved, 'Reading device projects…')}>Refresh saved projects</button>
+   <ul className="practice-regions">{savedProjects.map(item => <li key={item.id}>
+    <span>{item.name} · {item.sourceName} · {new Date(item.savedAt).toLocaleString()}{item.recoveryOf ? ' · previous version' : ''}</span>{' '}
+    <button type="button" disabled={busy || !facade.current?.openLocal} onClick={() => reopenDevice(item)}>{item.recoveryOf ? 'Reopen previous version' : 'Reopen saved copy'}</button>{' '}
+    {selectedSource && <><button type="button" disabled={busy || !facade.current?.openLocal} onClick={() => chooseLocalOriginal(item)}>Choose original and reopen</button>{' '}</>}
+    <button type="button" disabled={busy || item.id === localProject?.id || item.id === localProject?.recoveryOf} onClick={() => void removeDevice(item)}>Remove device copy</button>
+   </li>)}</ul>
+  </details>
+  <input className="visually-hidden" ref={localSourceInput} type="file" accept=".wav,.wave,.mp3,.flac,.m4a,.opus,.ogg,.oga" onChange={event => { const file = event.target.files?.[0]; const local = pendingLocalProject.current; pendingLocalProject.current = undefined; if (file && local) void run(() => open(file, undefined, local)); event.target.value = ''; }} />
   <details className="practice-shortcuts">
    <summary>Keyboard shortcuts</summary>
    <p>Shortcuts work while focus is in this workspace. Text fields keep their usual keys, and Space still activates a focused button. Holding a key sends one command.</p>
@@ -247,18 +301,17 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
    </>}
    {snapshot.transport?.config && <p>Playback selection: {snapshot.transport.config.loopEnabled ? `${(snapshot.transport.config.loopStart / snapshot.project.track.audio.sampleRate).toFixed(3)}–${(snapshot.transport.config.loopEnd / snapshot.project.track.audio.sampleRate).toFixed(3)} source seconds` : 'full track'} · {(snapshot.transport.config.speed * 100).toFixed(1)}% speed</p>}
    <PracticePlans key={sourceSession} snapshot={snapshot} busy={busy} liveAvailable={!!((facade.current?.liveSupported && snapshot.capabilities.streamPreview) || snapshot.capabilities.liveTransport) && snapshot.transport?.state !== 'error'} edit={edit} transport={transport} />
-   {wave && <><svg className="practice-waveform" viewBox="0 0 1000 160" role="img" aria-label={`${detailView ? 'Exact selection' : 'Track overview'} waveform; click sets selection start, Shift-click sets end`} onClick={selectInView}>
-    <rect x="0" y="0" width="1000" height="160" fill="transparent" />
-    {wave.cells.map((cell, index) => cell.channels.map((peak, channel) => <line key={`${index}-${channel}`} x1={(cell.startFrame - viewStart) / viewLength * 1000} x2={(cell.startFrame - viewStart) / viewLength * 1000} y1={40 + channel * 80 - peak.max * 35} y2={40 + channel * 80 - peak.min * 35} stroke="currentColor" strokeWidth="2" />))}
-   </svg><p>{(viewStart / wave.sampleRate).toFixed(6)}–{(viewEnd / wave.sampleRate).toFixed(6)} source seconds · {wave.framesPerCell} frames per cell</p></>}
+   {wave && <PracticeWaveform wave={wave} start={Number(start)} end={Number(end)} detail={detailView} disabled={busy} onSelect={(boundary,seconds) => {if (boundary === 'start') setStart(String(seconds)); else setEnd(String(seconds));}} />}
    <form className="practice-form" onSubmit={parameters}><label>Speed (%)<input type="number" step="0.1" value={speed} onChange={event => setSpeed(event.target.value)} disabled={busy} /></label><label>Pitch (semitones)<input type="number" step="0.1" value={pitch} onChange={event => setPitch(event.target.value)} disabled={busy} /></label><button disabled={busy}>Apply speed / pitch</button></form>
    <div className="practice-form"><label>Selection start (source seconds)<input type="number" step={1 / snapshot.project.track.audio.sampleRate} value={start} onChange={event => setStart(event.target.value)} disabled={busy} /></label><label>Selection end (source seconds)<input type="number" step={1 / snapshot.project.track.audio.sampleRate} value={end} onChange={event => setEnd(event.target.value)} disabled={busy} /></label><button type="button" disabled={busy} onClick={() => void loop(true)}>Apply A/B loop</button><button type="button" disabled={busy} onClick={() => void loop(false)}>Disable loop</button></div>
    <p>Saved loop: {snapshot.project.settings.loop.enabled ? 'enabled' : 'disabled'} · {snapshot.project.settings.loop.start.toFixed(6)}–{snapshot.project.settings.loop.end.toFixed(6)} source seconds</p>
-   <div className="practice-form"><label>Phrase name<input value={label} onChange={event => setLabel(event.target.value)} disabled={busy} /></label><button type="button" disabled={busy} onClick={savePhrase}>Save named phrase / loop</button></div>
+   <div className="practice-form"><label>Phrase name<input value={label} onChange={event => setLabel(event.target.value)} disabled={busy} /></label><button type="button" disabled={busy} onClick={savePhrase}>Save named phrase / loop</button>
+   {annotations.regions?.some(region => region.id === selectedRegion) && <><button type="button" disabled={busy} onClick={updatePhrase}>Update selected phrase</button><button type="button" disabled={busy} onClick={deletePhrase}>Remove selected phrase</button></>}</div>
    <label className="practice-notes">Phrase notes<textarea value={phraseNotes} onChange={event => setPhraseNotes(event.target.value)} disabled={busy} /></label>
    <label className="practice-notes">Project notes<textarea value={notes} onChange={event => setNotes(event.target.value)} disabled={busy} /></label><button type="button" disabled={busy} onClick={() => void edit({ type: 'set_annotations', annotations: { ...annotations, notes } })}>Save project notes</button>
-   <div className="practice-form"><label>Section marker name<input value={markerLabel} onChange={event => setMarkerLabel(event.target.value)} disabled={busy} /></label><button type="button" disabled={busy} onClick={() => void edit({ type: 'set_annotations', annotations: { ...annotations, markers: [...(annotations.markers ?? []), { id: `marker-${crypto.randomUUID()}`, kind: 'section', label: markerLabel, position: Number(start) }] } })}>Add marker at start</button></div>
-   <ul className="practice-regions">{annotations.regions?.map(region => <li key={region.id}><button type="button" disabled={busy} onClick={() => { setStart(String(region.start)); setEnd(String(region.end)); setLabel(region.label); setPhraseNotes(region.notes ?? ''); }}>{region.label}: {region.start.toFixed(3)}–{region.end.toFixed(3)}s</button></li>)}</ul>
+   <div className="practice-form"><label>Marker name<input value={markerLabel} onChange={event => setMarkerLabel(event.target.value)} disabled={busy} /></label><label>Marker kind<select value={markerKind} disabled={busy} onChange={event=>setMarkerKind(event.target.value as 'section'|'measure'|'beat')}><option value="section">Section</option><option value="measure">Measure</option><option value="beat">Beat</option></select></label>{markerKind!=='section'&&<label>Marker measure<input type="number" step="1" value={markerMeasure} disabled={busy} onChange={event=>setMarkerMeasure(event.target.value)} /></label>}{markerKind==='beat'&&<label>Marker beat<input type="number" step="1" value={markerBeat} disabled={busy} onChange={event=>setMarkerBeat(event.target.value)} /></label>}<button type="button" disabled={busy} onClick={() => void edit({ type: 'set_annotations', annotations: { ...annotations, markers: [...(annotations.markers ?? []), { id: `marker-${crypto.randomUUID()}`, kind: markerKind, label: markerLabel, position: Number(start),...(markerKind!=='section'?{measure:Number(markerMeasure)}:{}),...(markerKind==='beat'?{beat:Number(markerBeat)}:{}) }] } })}>Add marker at start</button></div>
+   {!!annotations.markers?.length && <ul className="practice-regions" aria-label="Saved markers">{annotations.markers.map(marker => <li key={marker.id}><button type="button" disabled={busy} onClick={() => setStart(String(marker.position))}>{marker.label}: {marker.position.toFixed(3)}s ({marker.kind}{marker.kind!=='section'?` ${marker.measure}${marker.kind==='beat'?`:${marker.beat}`:''}`:''})</button>{' '}<button type="button" disabled={busy} aria-label={`Remove marker ${marker.label}`} onClick={() => void edit({type:'set_annotations',annotations:{...annotations,markers:annotations.markers?.filter(item => item.id !== marker.id)}})}>Remove marker</button></li>)}</ul>}
+   <ul className="practice-regions" aria-label="Saved phrases">{annotations.regions?.map(region => <li key={region.id}><button type="button" disabled={busy} aria-pressed={selectedRegion === region.id} onClick={() => { setSelectedRegion(region.id); setStart(String(region.start)); setEnd(String(region.end)); setLabel(region.label); setPhraseNotes(region.notes ?? ''); }}>{region.label}: {region.start.toFixed(3)}–{region.end.toFixed(3)}s</button></li>)}</ul>
   </>}
  </section>;
 }

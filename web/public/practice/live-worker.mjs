@@ -14,11 +14,12 @@ export function receive(message) {
  return true;
 }
 class Device {
- constructor(module, info, readPCM) {
+ constructor(module, info, readPCM, readClicks) {
+  this.cuesSupported=typeof module._riffine_click_mix_window==='function';this.metronomeSupported=this.cuesSupported&&typeof readClicks==='function';
   this.closed = false; this.closing = undefined; this.info = info;
   this.processing = new ScheduledSelections(module, info, (start, count) => new Promise((resolve, reject) => readPCM(start, count, resolve, reject)), error => {
    void hostCall('fail', {message:error.message}).catch(() => {});
-  });
+  },readClicks ? (schedule,start,count)=>new Promise((resolve,reject)=>readClicks(schedule.generation,schedule.sequence,start,count,resolve,reject)) : undefined);
  }
  async operate(method, args) {
   if (method === 'close') return this.close();
@@ -57,14 +58,14 @@ class Device {
   await this.closing;
  }
 }
-export function open(info, readPCM, complete, failed) {
+export function open(info, readPCM, readClicks, complete, failed) {
  let device, cancelled = false;
  const opening = (async () => {
   try {
    const module = await ready;
    if (cancelled) throw new Error('Live output opening cancelled.');
    await hostCall('open', info);
-   device = new Device(module, info, readPCM);
+   device = new Device(module, info, readPCM,readClicks);
    if (cancelled) { await device.close(); throw new Error('Live output opening cancelled.'); }
    complete(device);
   } catch (error) {

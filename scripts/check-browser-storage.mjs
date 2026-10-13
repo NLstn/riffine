@@ -1,0 +1,52 @@
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {ProjectStore, MAX_DOCUMENT_BYTES} from '../web/public/practice/project-store.mjs';
+const require = createRequire(new URL('../web/package.json',import.meta.url));
+const {IDBFactory} = require('fake-indexeddb');
+const indexedDB = new IDBFactory();
+const database = 'storage-conformance';
+const first = new ProjectStore({indexedDB,database}), second = new ProjectStore({indexedDB,database});
+const original = JSON.stringify({version:4,name:'音楽',track:{path:'original.wav'},settings:{speed:.6,pitch:3},annotations:{notes:'Preserve this note'}});
+const edited = original.replace('0.6','0.65'), other = original.replace('0.6','0.7');
+const id = 'browser:fixture';
+const initial = await first.create(id,original);
+assert.match(initial.revision,/^[a-f0-9]{64}$/);
+assert.equal((await second.read(id)).document,original,'save did not survive a fresh store');
+await assert.rejects(second.create(id,other),error=>error.code==='document_exists');
+const competing = await Promise.allSettled([first.update(id,initial.revision,edited),second.update(id,initial.revision,other)]);
+assert.equal(competing.filter(item=>item.status==='fulfilled').length,1,'competing writers both committed');
+assert.equal(competing.find(item=>item.status==='rejected').reason.code,'revision_conflict');
+const committed = competing.find(item=>item.status==='fulfilled').value;
+assert.equal((await first.read(committed.recovery)).document,original);
+const latest = await second.read(id);
+assert([edited,other].includes(latest.document));
+await assert.rejects(first.update(id,initial.revision,original),error=>error.code==='revision_conflict');
+const cancelled = new AbortController(); cancelled.abort();
+await assert.rejects(first.update(id,latest.revision,original,cancelled.signal),error=>error.code==='cancelled');
+assert.equal((await first.read(id)).document,latest.document);
+await assert.rejects(first.create('browser:large',' '.repeat(MAX_DOCUMENT_BYTES+1)),error=>error.code==='document_limit');
+await assert.rejects(first.create('file:source',original),error=>error.code==='invalid_handle');
+await assert.rejects(new ProjectStore({indexedDB:null}).read(id),error=>error.code==='storage_unavailable');
+// Abort during a transaction must leave both current and recovery bytes intact.
+const aborting = new AbortController();
+const baseTransaction = first.transaction.bind(first);
+first.transaction = (mode,operation,signal) => baseTransaction(mode,(store,done,reject) => {operation(store,done,reject); aborting.abort();},signal);
+await assert.rejects(first.update(id,latest.revision,original,aborting.signal),error=>error.code==='cancelled');
+first.transaction = baseTransaction;
+assert.equal((await first.read(id)).document,latest.document);
+// A quota failure after queuing publication must roll back the whole transaction.
+first.transaction = (mode,operation,signal) => baseTransaction(mode,(store,done,reject) => {
+ const failingStore = new Proxy(store,{get(target,key){
+  if(key==='put') return () => {reject(new DOMException('Storage exhausted','QuotaExceededError'));};
+  const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;
+ }});
+ operation(failingStore,done,reject);
+},signal);
+await assert.rejects(first.update(id,latest.revision,original),error=>error.code==='storage_quota');
+first.transaction = baseTransaction;
+assert.equal((await first.read(id)).document,latest.document);
+assert.equal((await first.list()).length,2);
+await first.remove(id);
+assert.deepEqual(await second.list(),[],'remove left recovery copies behind');
+await assert.rejects(first.read(id),error=>error.code==='resource_unavailable');
+console.log(JSON.stringify({durableCopies:true,exclusiveCreate:true,concurrentWritersFenced:true,previousBytesRecoverable:true,cancellationAtomic:true,quotaFailureAtomic:true,oversizeRejected:true,deletionIncludesRecovery:true}));

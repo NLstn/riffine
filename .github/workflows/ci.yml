@@ -50,8 +50,23 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
         working-directory: web
+      - name: Activate pinned Emscripten and build offline processing assets
+        run: |
+          git clone https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/riffine-web-emsdk"
+          git -C "$RUNNER_TEMP/riffine-web-emsdk" checkout eff90ca04a3785f571a8095b3a42b63799cf384a
+          "$RUNNER_TEMP/riffine-web-emsdk/emsdk" install 4.0.14
+          "$RUNNER_TEMP/riffine-web-emsdk/emsdk" activate 4.0.14
+          source "$RUNNER_TEMP/riffine-web-emsdk/emsdk_env.sh"
+          sh scripts/build-browser-dsp.sh
       - run: npm run build
         working-directory: web
+      - name: Execute source-tempo timing tests under Go WASM
+        run: GOOS=js GOARCH=wasm go test -exec "$(go env GOROOT)/lib/wasm/go_js_wasm_exec" -run 'TestCue|TestSavedBeat|TestPauseResumeCue|TestUnsupportedCueHost|TestOriginalTempo|TestEndMarker' ./core/engine ./core/project ./core/practice ./core/timing
+      - name: Check durable browser projects and complete offline cache
+        run: |
+          node scripts/check-browser-storage.mjs
+          node scripts/check-browser-saved-projects.mjs
+          node scripts/check-browser-offline.mjs
       - name: Check M4A and Opus import, seeking and saved projects
         run: node scripts/check-browser-codecs.mjs --media-only
       - run: node scripts/check-browser-output.mjs
@@ -60,6 +75,7 @@ jobs:
       - run: node scripts/check-browser-live-host.mjs
       - run: node --experimental-strip-types scripts/check-practice-facade.mjs
       - run: node scripts/check-practice-workspace.mjs
+      - run: node scripts/check-practice-waveform.mjs
       - run: node --experimental-strip-types scripts/check-practice-shortcuts.mjs
   native:
     strategy:
@@ -127,8 +143,8 @@ jobs:
             '-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
             '-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
             '-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined'
-          cmake --build build/native-safety --target riffine-scheduled-test riffine-stream-abi-test riffine-presentation-queue-test riffine-device-clock-test riffine-rate-selection-test riffine-audio --parallel 2
-      - run: ctest --test-dir build/native-safety -R 'bounded-scheduled-worker|streaming-c-abi|native-presentation-queue|native-device-clock|device-rate-selection-processing' --output-on-failure --no-tests=error
+          cmake --build build/native-safety --target riffine-click-test riffine-scheduled-test riffine-stream-abi-test riffine-presentation-queue-test riffine-device-clock-test riffine-rate-selection-test riffine-audio --parallel 2
+      - run: ctest --test-dir build/native-safety -R 'shared-click-synthesis|bounded-scheduled-worker|streaming-c-abi|native-presentation-queue|native-device-clock|device-rate-selection-processing' --output-on-failure --no-tests=error
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1

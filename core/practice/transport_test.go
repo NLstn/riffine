@@ -380,3 +380,6 @@ func TestCancellationDuringLiveFactoryFencesDeviceBeforeReader(t *testing.T) {
 		})
 	}
 }
+
+func (d *sessionDevice) SupportsCues() bool      { return true }
+func (d *sessionDevice) SupportsMetronome() bool { return true }

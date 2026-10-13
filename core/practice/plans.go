@@ -18,6 +18,9 @@ func (s *Session) dispatchPracticePlan(ctx context.Context, command Command, p p
 		return failure(HostFailure, errors.New("transport requires recovery"))
 	}
 	reject := func(err error) error {
+		if errors.Is(err, engine.ErrUnsupportedCues) || errors.Is(err, engine.ErrUnsupportedMetronome) {
+			return failure(UnsupportedCapability, err)
+		}
 		attachment.dirty = attachment.transport.Snapshot().State == "error"
 		s.collectTransportEvents()
 		if attachment.dirty {
@@ -32,6 +35,10 @@ func (s *Session) dispatchPracticePlan(ctx context.Context, command Command, p p
 			return failure(InvalidCommand, err)
 		}
 		config := s.transportConfig(p, before.Config.OutputRate)
+		config.Cues, err = p.ResolvePlanCues(saved)
+		if err != nil {
+			return failure(InvalidCommand, err)
+		}
 		for _, region := range p.Annotations.Regions {
 			if region.ID == saved.RegionID {
 				config.LoopEnabled = true

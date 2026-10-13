@@ -1,3 +1,4 @@
+import {ClickMixer,CueSelection} from './click-mixer.mjs';
 import { Selection } from './selection.mjs';
 import { OutputWriter, QueueState, CountersBusyError } from './output-queue.mjs';
 import { PresentedReader, PresentedBusyError, PresentedState } from './presented-counter.mjs';
@@ -7,8 +8,9 @@ const delay = () => new Promise(resolve => setTimeout(resolve, 4));
 // and owns presentation-aware device lifecycle. This class never chooses loops,
 // adjusts source positions, extrapolates device clocks or emits practice events.
 export class ScheduledSelections {
- constructor(module, info, readPCM, onFailure) {
+ constructor(module, info, readPCM, onFailure, readClicks) {
   if (typeof readPCM !== 'function' || typeof onFailure !== 'function') throw new Error('Scheduled processing requires source and failure ports.');
+  this.readClicks=readClicks;
   this.module = module; this.info = Object.freeze({...info}); this.readPCM = readPCM; this.onFailure = onFailure;
   this.ledger = new ScheduleAcknowledgements(); this.jobs = []; this.epoch = 0; this.task = undefined;
   this.writer = undefined; this.counter = undefined; this.failure = undefined; this.closed = false; this.queuedFrames = 0;
@@ -31,14 +33,24 @@ export class ScheduledSelections {
   if (this.ledger.outputEnd && output && output.copiedFrames >= this.ledger.outputEnd && output.underrunFrames) {
    const error = new Error('Output starved before a scheduled continuation.'); this.fail(error); throw error;
   }
-  const s = {...schedule};
-  if (s.source !== this.info.source || !Number.isSafeInteger(s.startFrame) || !Number.isSafeInteger(s.endFrame) || s.startFrame < 0 || s.endFrame <= s.startFrame || s.endFrame > this.info.frames) throw new Error('Invalid verified source schedule.');
-  const selection = new Selection(this.module, this.info.channels, this.info.sampleRate, s.endFrame - s.startFrame, s.speed, s.pitch, s.edgeFadeFrames);
+  const s = {...schedule, ...(schedule.clicks ? {clicks:schedule.clicks.map(click=>Object.freeze({...click}))}: {})};
+  if (s.source !== this.info.source || !Number.isSafeInteger(s.startFrame) || !Number.isSafeInteger(s.endFrame) || s.startFrame < 0 || ((!s.phase&&s.endFrame<=s.startFrame)||(s.phase&&s.endFrame!==s.startFrame)) || s.endFrame > this.info.frames) throw new Error('Invalid verified source schedule.');
+  if (s.phase && !['count_in','rest'].includes(s.phase)) throw new Error('Unsupported cue phase.');
+  if (s.phase && (!Number.isSafeInteger(s.cueOffsetFrames??0)||(s.cueOffsetFrames??0)<0||s.outputEnd-s.outputStart+(s.cueOffsetFrames??0)>this.info.sampleRate*120||!Array.isArray(s.clicks??[])||(s.clicks??[]).length>32||!Number.isFinite(s.clickLevel)||s.clickLevel<0||s.clickLevel>1)) throw new Error('Invalid bounded cue schedule.');
+  if (s.phase && (s.startFrame>=this.info.frames||s.edgeFadeFrames!==0||!Number.isFinite(s.speed)||s.speed<.25||s.speed>2||!Number.isFinite(s.pitch)||s.pitch<-12||s.pitch>12)) throw new Error('Invalid cue source/parameters.');
+  if (s.phase==='rest'&&((s.clicks??[]).length||s.clickLevel!==0)) throw new Error('Rest phases cannot contain clicks.');
+  if (s.phase) for(let i=0;i<(s.clicks??[]).length;i++){const click=s.clicks[i];if(!Number.isSafeInteger(click.outputFrame)||click.outputFrame<0||click.outputFrame>=(s.cueOffsetFrames??0)+s.outputEnd-s.outputStart||typeof click.accent!=='boolean'||i>0&&click.outputFrame<=s.clicks[i-1].outputFrame) throw new Error('Invalid ordered cue click events.');}
+  if (s.metronome && typeof this.readClicks!=='function') throw new Error('Core beat-window port is unavailable.');
+  let selection,mixer;
+  try {
+   selection = s.phase ? new CueSelection(this.module,this.info,s) : new Selection(this.module, this.info.channels, this.info.sampleRate, s.endFrame - s.startFrame, s.speed, s.pitch, s.edgeFadeFrames);
+   if(s.metronome)mixer=new ClickMixer(this.module,this.info.channels,this.info.sampleRate,s.clickLevel,s.outputEnd-s.outputStart);
+  } catch(error) {selection?.close();mixer?.close();throw error;}
   try {
    if (selection.info().outputFrames !== s.outputEnd - s.outputStart) throw new Error('Scheduled output length differs from shared processing.');
    this.ledger.accept(s);
-   this.jobs.push({schedule: Object.freeze(s), selection, read: 0});
-  } catch (error) { selection.close(); throw error; }
+   this.jobs.push({schedule: Object.freeze(s), selection, mixer, read: 0, generated:0});
+  } catch (error) { selection.close(); mixer?.close(); throw error; }
   this.ensurePump();
  }
  ensurePump() {
@@ -57,6 +69,12 @@ export class ScheduledSelections {
      if (epoch !== this.epoch) return;
      const result = job.selection.read(4096);
      if (result.frames) {
+      if (job.mixer) {
+       const clicks=await this.readClicks(s,job.generated,result.frames);
+       if (epoch!==this.epoch) return;
+       job.mixer.mix(result.pcm,job.generated,clicks);
+      }
+      job.generated+=result.frames;
       for (;;) { if (epoch !== this.epoch) return; if (this.writer.write(result.pcm)) break; await delay(); }
       this.queuedFrames += result.frames;
      }
@@ -72,7 +90,7 @@ export class ScheduledSelections {
       break;
      }
     }
-   } finally { job.selection.close(); }
+   } finally { job.selection.close(); job.mixer?.close(); }
    this.jobs.shift();
   }
  }
@@ -118,7 +136,7 @@ export class ScheduledSelections {
  async stopProcessing() {
   this.epoch++; this.writer?.close();
   await this.task;
-  for (const job of this.jobs) job.selection.close(); this.jobs = [];
+  for (const job of this.jobs) {job.selection.close();job.mixer?.close();} this.jobs = [];
  }
  async close() { if (!this.closing) { this.closed = true; this.closing = this.stopProcessing(); } await this.closing; }
 }

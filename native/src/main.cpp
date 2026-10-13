@@ -22,7 +22,7 @@ int run(int argc, char **argv) {
     if(argc==2 && std::string(argv[1])=="version") {std::puts("riffine-audio ABI 1; Signalsmith Stretch + miniaudio");return 0;}
     int result=1;
     auto operation = argc > 1 ? std::string(argv[1]) : std::string();
-    if(argc==2 && operation=="formats") { std::puts(R"({"abi":1,"formats":["wav-pcm","flac","mp3"],"borrowedSources":true,"borrowedPreview":true,"borrowedRender":true,"scheduledControl":2})"); return 0; }
+    if(argc==2 && operation=="formats") { std::puts(R"({"abi":1,"formats":["wav-pcm","flac","mp3"],"borrowedSources":true,"borrowedPreview":true,"borrowedRender":true,"scheduledControl":2,"scheduledCues":1})"); return 0; }
     if(argc==2 && operation=="device-info"){
       auto info=riffine::probeOutputBackend();
       std::printf(R"({"sampleRate":%u,"channels":%u,"bufferFrames":%u,"latencyFrames":%u})" "\n",info.sample_rate,info.channels,info.buffer_frames,info.latency_frames);return 0;
