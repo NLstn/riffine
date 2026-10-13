@@ -50,7 +50,7 @@ class SimulatorCheckTests(unittest.TestCase):
             stdout = json.dumps({"devices": {"com.apple.CoreSimulator.SimRuntime.iOS-26-4": [
                 {"isAvailable": True, "name": "iPhone test", "udid": "test-udid", "state": self.state}
             ]}})
-        elif "/bin/launchctl" in args:
+        elif str(self.output / "spawn-probe") in args:
             if self.probe_failures:
                 raise self.probe_failures.pop(0)
         elif "spawn" in args:
@@ -72,7 +72,7 @@ class SimulatorCheckTests(unittest.TestCase):
         checker.main()
         actions = [args[2] for args in self.calls if args[0] == "xcrun"]
         self.assertEqual(actions, ["list", "boot", "bootstatus", "spawn", "spawn", "shutdown"])
-        self.assertIn("/bin/launchctl", self.spawns()[0])
+        self.assertIn(str(self.output / "spawn-probe"), self.spawns()[0])
         self.assertEqual(self.spawns()[1][-1], "20")
         self.assertEqual(json.loads((self.output / "report.json").read_text()), self.report)
 
@@ -87,14 +87,14 @@ class SimulatorCheckTests(unittest.TestCase):
                                subprocess.CalledProcessError(1, "probe", stderr="not ready")]
         checker.main()
         self.assertEqual(len(self.spawns()), 4)
-        self.assertTrue(all("/bin/launchctl" in args for args in self.spawns()[:3]))
+        self.assertTrue(all(str(self.output / "spawn-probe") in args for args in self.spawns()[:3]))
 
     def test_exhausted_readiness_fails_without_running_fixture(self):
         self.probe_failures = [subprocess.TimeoutExpired("probe", 60) for _ in range(3)]
         with self.assertRaises(subprocess.TimeoutExpired):
             checker.main()
         self.assertEqual(len(self.spawns()), 3)
-        self.assertTrue(all("/bin/launchctl" in args for args in self.spawns()))
+        self.assertTrue(all(str(self.output / "spawn-probe") in args for args in self.spawns()))
         self.assertFalse((self.output / "report.json").exists())
         self.assertIn("shutdown", self.calls[-1])
 

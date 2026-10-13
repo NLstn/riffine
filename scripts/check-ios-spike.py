@@ -46,7 +46,7 @@ def wait_for_spawn(udid):
     # a cold hosted runner. Retry only a harmless readiness probe, never fixtures.
     for attempt in range(3):
         try:
-            run("xcrun", "simctl", "spawn", udid, "/bin/launchctl", "version", timeout=60)
+            run("xcrun", "simctl", "spawn", udid, str(output / "spawn-probe"), timeout=60)
             return
         except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
             if attempt == 2:

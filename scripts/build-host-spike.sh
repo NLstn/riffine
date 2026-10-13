@@ -21,6 +21,8 @@ case "$mode" in
  ios)
   sdk="$(xcrun --sdk iphonesimulator --show-sdk-path)"
   clang="$(xcrun --sdk iphonesimulator --find clang)"
+  # Use a simulator-targeted executable for launch readiness, not a macOS tool.
+  "$clang" -target arm64-apple-ios14.0-simulator -isysroot "$sdk" spikes/mobile/spawn_probe.c -o "$output/spawn-probe"
   # arm64 simulator; device slice/signing and framework packaging are future work.
   CGO_ENABLED=1 GOOS=ios GOARCH=arm64 CC="$clang -target arm64-apple-ios14.0-simulator -isysroot $sdk" go build -trimpath -buildmode=c-archive -o "$output/libhost-spike.a" ./cmd/host-spike-mobile
   "$clang" -target arm64-apple-ios14.0-simulator -isysroot "$sdk" -I "$output" spikes/mobile/runner.c "$output/libhost-spike.a" -framework Foundation -framework CoreFoundation -lresolv -o "$output/mobile-runner"
