@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/NLstn/riffine/core/ladder"
+	"github.com/NLstn/riffine/core/timing"
 	"math"
 	"sync"
 )
@@ -29,15 +30,16 @@ const transportEventCapacity = 128
 // output rate may differ from the source rate. Metadata has already been verified
 // by the session; this controller does not open or decode resources.
 type TransportConfig struct {
-	Source      string  `json:"source"`
-	Frames      int64   `json:"frames"`
-	SampleRate  int     `json:"sampleRate"`
-	OutputRate  int     `json:"outputRate"`
-	Speed       float64 `json:"speed"`
-	Pitch       float64 `json:"pitch"`
-	LoopEnabled bool    `json:"loopEnabled"`
-	LoopStart   int64   `json:"loopStart"`
-	LoopEnd     int64   `json:"loopEnd"`
+	Source      string                `json:"source"`
+	Frames      int64                 `json:"frames"`
+	SampleRate  int                   `json:"sampleRate"`
+	OutputRate  int                   `json:"outputRate"`
+	Speed       float64               `json:"speed"`
+	Pitch       float64               `json:"pitch"`
+	LoopEnabled bool                  `json:"loopEnabled"`
+	LoopStart   int64                 `json:"loopStart"`
+	LoopEnd     int64                 `json:"loopEnd"`
+	Cues        *timing.CueDefinition `json:"cues,omitempty"`
 }
 type TransportCommand struct {
 	Version  int                `json:"version"`
@@ -55,16 +57,18 @@ type TransportLoop struct {
 	EndFrame   int64 `json:"endFrame"`
 }
 type TransportSnapshot struct {
-	Version             int              `json:"version"`
-	Sequence            uint64           `json:"sequence"`
-	Generation          uint64           `json:"generation"`
-	State               string           `json:"state"`
-	SourceFrame         int64            `json:"sourceFrame"`
-	ConsumedOutputFrame int64            `json:"consumedOutputFrame"`
-	CompletedLoops      uint64           `json:"completedLoops"`
-	Config              TransportConfig  `json:"config"`
-	Error               string           `json:"error,omitempty"`
-	Plan                *ladder.Snapshot `json:"plan,omitempty"`
+	Version              int              `json:"version"`
+	Sequence             uint64           `json:"sequence"`
+	Generation           uint64           `json:"generation"`
+	State                string           `json:"state"`
+	SourceFrame          int64            `json:"sourceFrame"`
+	ConsumedOutputFrame  int64            `json:"consumedOutputFrame"`
+	CompletedLoops       uint64           `json:"completedLoops"`
+	Config               TransportConfig  `json:"config"`
+	Error                string           `json:"error,omitempty"`
+	Plan                 *ladder.Snapshot `json:"plan,omitempty"`
+	Phase                string           `json:"phase,omitempty"`
+	PhaseRemainingFrames int64            `json:"phaseRemainingFrames,omitempty"`
 }
 type TransportEvent struct {
 	Type           string  `json:"type"`
@@ -75,6 +79,8 @@ type TransportEvent struct {
 	EndFrame       int64   `json:"endFrame"`
 	Speed          float64 `json:"speed"`
 	Pitch          float64 `json:"pitch"`
+	Phase          string  `json:"phase,omitempty"`
+	PhaseFrames    int64   `json:"phaseFrames,omitempty"`
 }
 type plannedTraversal struct {
 	schedule Schedule
@@ -96,6 +102,9 @@ type Transport struct {
 	autoResumePlan   bool
 	scheduleSequence uint64
 	events           []TransportEvent
+	grid             *timing.Grid
+	countInPending   bool
+	resumeCue        *Schedule
 }
 
 func NewTransport(device TransportDevice) (*Transport, error) {
@@ -111,6 +120,10 @@ func validateTransport(c TransportConfig) error {
 	if c.LoopStart < 0 || c.LoopEnd < c.LoopStart || c.LoopEnd > c.Frames || (c.LoopEnabled && c.LoopEnd == c.LoopStart) {
 		return errors.New("invalid transport loop")
 	}
+	_, err := c.Cues.Compile(c.SampleRate, c.Frames)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 func (t *Transport) Snapshot() TransportSnapshot {
@@ -120,6 +133,10 @@ func (t *Transport) Snapshot() TransportSnapshot {
 }
 func (t *Transport) currentSnapshot() TransportSnapshot {
 	s := t.snapshot
+	s.Config.Cues = s.Config.Cues.Clone()
+	if t.snapshot.Config.Cues.Enabled() {
+		t.phaseSnapshot(&s)
+	}
 	if t.planRun != nil {
 		progress := t.planRun.Snapshot()
 		s.Plan = &progress
@@ -185,11 +202,28 @@ func (t *Transport) LoadPlan(ctx context.Context, c TransportConfig, definition 
 }
 
 func (t *Transport) load(ctx context.Context, c TransportConfig, plan *ladder.Plan) error {
+	c.Cues = c.Cues.Clone()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if err := validateTransport(c); err != nil {
 		return err
+	}
+	if err := t.cueHost(c); err != nil {
+		return err
+	}
+	grid, err := c.Cues.Compile(c.SampleRate, c.Frames)
+	if err != nil {
+		return err
+	}
+	if c.Cues != nil && c.Cues.CountInBeats > 0 {
+		start, end := int64(0), c.Frames
+		if c.LoopEnabled {
+			start, end = c.LoopStart, c.LoopEnd
+		}
+		if _, _, err = grid.CountIn(ctx, timing.Selection{StartFrame: start, EndFrame: end, OutputRate: c.OutputRate, Speed: c.Speed}, c.Cues.CountInBeats); err != nil {
+			return err
+		}
 	}
 	if t.snapshot.State == "playing" {
 		if err := t.suspend(ctx); err != nil {
@@ -199,6 +233,10 @@ func (t *Transport) load(ctx context.Context, c TransportConfig, plan *ladder.Pl
 	if err := t.reset(ctx); err != nil {
 		return err
 	}
+	c.Cues = c.Cues.Clone()
+	t.grid = grid
+	t.resumeCue = nil
+	t.countInPending = c.Cues != nil && c.Cues.CountInBeats > 0
 	t.snapshot.Config = c
 	t.snapshot.Sequence = 0
 	t.snapshot.State = "ready"
@@ -231,24 +269,11 @@ func (t *Transport) plan(ctx context.Context, start int64, eligible bool) error 
 	if t.scheduleSequence == math.MaxUint64 {
 		return t.fail(errors.New("schedule sequence exhausted"))
 	}
-	outputStart := t.snapshot.ConsumedOutputFrame
-	if len(t.plans) > 0 {
-		outputStart = t.plans[len(t.plans)-1].schedule.OutputEnd
-	}
+	outputStart := t.outputStart()
 	c := t.snapshot.Config
-	speed := c.Speed
-	if t.planRun != nil && t.planRun.Snapshot().State == "running" {
-		ordinal := t.planRun.Snapshot().CompletedLoops + 1
-		for _, p := range t.plans {
-			if p.eligible {
-				ordinal++
-			}
-		}
-		var play bool
-		speed, play = t.planRun.Plan().SpeedForLoop(ordinal)
-		if !play {
-			return nil
-		}
+	speed, play := t.nextSpeed()
+	if !play {
+		return nil
 	}
 	frames := int64(math.Round(float64(end-start) * float64(c.OutputRate) / float64(c.SampleRate) / speed))
 	if frames < 1 {
@@ -260,32 +285,67 @@ func (t *Transport) plan(ctx context.Context, start int64, eligible bool) error 
 	t.scheduleSequence++
 	s := Schedule{Generation: t.snapshot.Generation, Sequence: t.scheduleSequence, Source: c.Source, StartFrame: start, EndFrame: end, OutputStart: outputStart, OutputEnd: outputStart + frames, Speed: speed, Pitch: c.Pitch}
 	s.EdgeFadeFrames = min(int64(c.OutputRate/200), (frames+1)/2)
+	if c.Cues != nil && c.Cues.Metronome {
+		s.BeatGrid = t.grid
+		s.BeatSelection = timing.Selection{StartFrame: start, EndFrame: end, OutputRate: c.OutputRate, Speed: speed}
+		s.ClickLevel = c.Cues.ClickLevel
+	}
 	gate, err := NewTraversal(s)
 	if err != nil {
 		return t.fail(err)
 	}
-	if err = t.device.Schedule(ctx, s); err != nil {
+	if err = t.device.Schedule(ctx, s.Clone()); err != nil {
 		return t.fail(err)
 	}
 	t.plans = append(t.plans, plannedTraversal{s, gate, eligible})
 	return nil
 }
 func (t *Transport) fill(ctx context.Context, eligible bool) error {
-	if len(t.plans) == 0 {
-		if err := t.plan(ctx, t.snapshot.SourceFrame, eligible); err != nil {
-			return err
-		}
-	}
-	if t.snapshot.Config.LoopEnabled {
-		start, _ := t.bounds()
-		for len(t.plans) < 2 {
-			before := len(t.plans)
-			if err := t.plan(ctx, start, true); err != nil {
-				return err
+	for len(t.plans) < 2 {
+		before := len(t.plans)
+		if before == 0 {
+			if t.resumeCue != nil {
+				cue := t.resumeCue
+				if err := t.cue(ctx, cue.Phase, cue.StartFrame, cue); err != nil {
+					return err
+				}
+				t.resumeCue = nil
+			} else if t.countInPending {
+				if err := t.cue(ctx, "count_in", t.snapshot.SourceFrame, nil); err != nil {
+					return err
+				}
+				t.countInPending = false
+			} else {
+				if err := t.plan(ctx, t.snapshot.SourceFrame, eligible); err != nil {
+					return err
+				}
 			}
-			if len(t.plans) == before {
+		} else {
+			last := t.plans[before-1].schedule
+			start, _ := t.bounds()
+			if !last.Audio() {
+				if err := t.plan(ctx, last.StartFrame, t.resumeEligible && last.StartFrame == start); err != nil {
+					return err
+				}
+			} else if t.snapshot.Config.LoopEnabled {
+				if _, play := t.nextSpeed(); !play {
+					break
+				}
+				if t.snapshot.Config.Cues != nil && t.snapshot.Config.Cues.RestSeconds > 0 {
+					if err := t.cue(ctx, "rest", start, nil); err != nil {
+						return err
+					}
+				} else {
+					if err := t.plan(ctx, start, true); err != nil {
+						return err
+					}
+				}
+			} else {
 				break
 			}
+		}
+		if len(t.plans) == before {
+			break
 		}
 	}
 	return nil
@@ -316,15 +376,28 @@ func (t *Transport) acknowledge(acks []OutputAcknowledgement) error {
 		if err != nil {
 			return t.fail(err)
 		}
-		t.snapshot.Config.Speed = s.Speed
+		if s.Audio() {
+			t.snapshot.Config.Speed = s.Speed
+		}
 		t.snapshot.ConsumedOutputFrame = a.ConsumedOutputFrame
-		t.resumeEligible = p.eligible && a.ConsumedOutputFrame == s.OutputStart
+		if s.Audio() {
+			t.resumeEligible = p.eligible && a.ConsumedOutputFrame == s.OutputStart
+		}
 		// Interpolate using this schedule's exact rounded output length, including
 		// source/device rate conversion. Never add decode-ahead or wall-clock time.
 		fraction := float64(a.ConsumedOutputFrame-s.OutputStart) / float64(s.OutputEnd-s.OutputStart)
-		t.snapshot.SourceFrame = s.StartFrame + int64(math.Floor(fraction*float64(s.EndFrame-s.StartFrame)))
+		t.snapshot.SourceFrame = s.StartFrame
+		if s.Audio() {
+			t.snapshot.SourceFrame += int64(math.Floor(fraction * float64(s.EndFrame-s.StartFrame)))
+		}
 		if complete != nil {
-			if p.eligible {
+			if !s.Audio() {
+				if len(t.events) == transportEventCapacity {
+					return t.fail(errors.New("transport event queue overflow; drain events before polling"))
+				}
+				t.events = append(t.events, TransportEvent{Type: "phase_completed", Phase: s.Phase, PhaseFrames: s.OutputEnd - s.OutputStart + s.CueOffsetFrames, Generation: s.Generation, Sequence: s.Sequence, CompletedLoops: t.snapshot.CompletedLoops, StartFrame: s.StartFrame, EndFrame: s.EndFrame, Speed: s.Speed, Pitch: s.Pitch})
+			}
+			if s.Audio() && p.eligible {
 				if len(t.events) == transportEventCapacity {
 					return t.fail(errors.New("transport event queue overflow; drain events before polling"))
 				}
@@ -349,7 +422,11 @@ func (t *Transport) acknowledge(acks []OutputAcknowledgement) error {
 		}
 	}
 	if len(t.plans) > 0 {
-		t.snapshot.Config.Speed = t.plans[0].schedule.Speed
+		if t.plans[0].schedule.Audio() {
+			t.snapshot.Config.Speed = t.plans[0].schedule.Speed
+		} else if t.planRun != nil && t.planRun.Snapshot().State == "running" {
+			t.snapshot.Config.Speed = t.planRun.Snapshot().Speed
+		}
 	}
 	return nil
 }
@@ -387,7 +464,7 @@ func (t *Transport) Poll(ctx context.Context) (TransportSnapshot, error) {
 		t.snapshot.State = "stopped"
 		return t.currentSnapshot(), nil
 	}
-	if len(t.plans) > 0 {
+	if len(t.plans) > 0 && t.plans[0].schedule.Audio() {
 		t.snapshot.Config.Speed = t.plans[0].schedule.Speed
 	}
 	err = t.fill(ctx, true)
@@ -508,6 +585,16 @@ func (t *Transport) Dispatch(ctx context.Context, c TransportCommand) (Transport
 	}
 	if c.Speed == nil {
 		next.Speed = t.snapshot.Config.Speed
+	}
+	switch c.Type {
+	case "pause", "set_parameters", "resume_plan", "clear_plan":
+		t.preserveCue()
+	case "restart", "stop", "recover", "set_plan", "set_loop":
+		t.resumeCue = nil
+		t.countInPending = next.Cues != nil && next.Cues.CountInBeats > 0
+	case "seek":
+		t.resumeCue = nil
+		t.countInPending = false
 	}
 	if err := t.reset(ctx); err != nil {
 		return t.currentSnapshot(), err

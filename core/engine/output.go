@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	"github.com/NLstn/riffine/core/timing"
+	"slices"
 	"time"
 )
 
@@ -22,7 +24,13 @@ type Schedule struct {
 	Speed, Pitch           float64
 	// EdgeFadeFrames requests independent linear gain ramps at both ends.
 	// The adapter does not overlap, shorten, or expand the source selection.
-	EdgeFadeFrames int64
+	EdgeFadeFrames  int64
+	Phase           string           `json:"phase,omitempty"` // empty=audio; count_in/rest never complete a loop
+	CueOffsetFrames int64            `json:"cueOffsetFrames,omitempty"`
+	Clicks          []timing.Click   `json:"clicks,omitempty"` // finite count-in, original phase coordinates
+	ClickLevel      float64          `json:"clickLevel,omitempty"`
+	BeatGrid        *timing.Grid     `json:"-"`
+	BeatSelection   timing.Selection `json:"-"`
 }
 type OutputAcknowledgement struct {
 	Generation          uint64
@@ -39,3 +47,19 @@ type OutputDevice interface {
 	Reset(context.Context, uint64) error
 	DrainAcknowledgements(context.Context, int) ([]OutputAcknowledgement, error)
 }
+
+// Optional capabilities prevent hosts from silently playing cue-enabled plans
+// as plain loops. These methods run on a control worker, never an audio callback.
+type CueDevice interface{ SupportsCues() bool }
+type MetronomeDevice interface{ SupportsMetronome() bool }
+
+func (s Schedule) Audio() bool { return s.Phase == "" }
+func (s Schedule) ClickWindow(ctx context.Context, start, end int64) ([]timing.Click, error) {
+	if s.BeatGrid == nil {
+		return nil, nil
+	}
+	batch, err := s.BeatGrid.Clicks(ctx, s.BeatSelection, start, end)
+	return batch.Clicks, err
+}
+
+func (s Schedule) Clone() Schedule { s.Clicks = slices.Clone(s.Clicks); return s }

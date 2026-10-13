@@ -18,7 +18,7 @@ FetchContent_Declare(miniaudio
   GIT_SUBMODULES ""
   SOURCE_SUBDIR riffine-no-upstream-targets)
 FetchContent_MakeAvailable(signalsmith-linear signalsmith-stretch miniaudio)
-add_library(riffine-dsp STATIC src/audio.cpp src/decode.cpp src/stream.cpp src/selection.cpp src/preview_source.cpp src/preview.cpp src/scheduled.cpp src/rate_selection.cpp)
+add_library(riffine-dsp STATIC src/audio.cpp src/decode.cpp src/stream.cpp src/selection.cpp src/preview_source.cpp src/preview.cpp src/scheduled.cpp src/rate_selection.cpp src/click.cpp)
 target_include_directories(riffine-dsp PUBLIC include PRIVATE ${miniaudio_SOURCE_DIR})
 find_package(Threads REQUIRED)
 target_link_libraries(riffine-dsp PRIVATE signalsmith-stretch Threads::Threads)
@@ -36,6 +36,9 @@ install(FILES ${signalsmith-linear_SOURCE_DIR}/LICENSE.txt DESTINATION licenses 
 install(FILES ${miniaudio_SOURCE_DIR}/LICENSE DESTINATION licenses RENAME miniaudio.txt)
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(riffine-click-test src/click_test.cpp)
+  target_link_libraries(riffine-click-test PRIVATE riffine-dsp)
+  add_test(NAME shared-click-synthesis COMMAND riffine-click-test)
   add_executable(riffine-rate-selection-test src/rate_selection_test.cpp)
   target_link_libraries(riffine-rate-selection-test PRIVATE riffine-dsp)
   add_test(NAME device-rate-selection-processing COMMAND riffine-rate-selection-test)

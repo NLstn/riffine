@@ -26,18 +26,21 @@ func LiveAvailable() bool {
 
 type LiveFactory struct{}
 type liveDevice struct {
-	info      audio.Info
-	pcm       audio.PCMStream
-	control   js.Value
-	read      js.Func
-	reads     sync.WaitGroup
-	readMu    sync.Mutex
-	samples   [1024]float32
-	raw       [4096]byte
-	lifetime  context.Context
-	cancel    context.CancelFunc
-	closeOnce sync.Once
-	closeErr  error
+	info       audio.Info
+	pcm        audio.PCMStream
+	control    js.Value
+	read       js.Func
+	readClicks js.Func
+	scheduleMu sync.Mutex
+	schedules  map[uint64]engine.Schedule
+	reads      sync.WaitGroup
+	readMu     sync.Mutex
+	samples    [1024]float32
+	raw        [4096]byte
+	lifetime   context.Context
+	cancel     context.CancelFunc
+	closeOnce  sync.Once
+	closeErr   error
 }
 type liveResult struct {
 	value js.Value
@@ -106,7 +109,7 @@ func (LiveFactory) OpenLive(ctx context.Context, source practice.VerifiedSource)
 		return nil, err
 	}
 	lifetime, cancel := context.WithCancel(context.Background())
-	d := &liveDevice{info: source.Info, pcm: pcm, lifetime: lifetime, cancel: cancel, control: js.Undefined()}
+	d := &liveDevice{info: source.Info, pcm: pcm, lifetime: lifetime, cancel: cancel, control: js.Undefined(), schedules: map[uint64]engine.Schedule{}}
 	d.read = js.FuncOf(func(_ js.Value, args []js.Value) any {
 		start, count, resolve, reject := args[0].Float(), args[1].Float(), args[2], args[3]
 		d.reads.Add(1)
@@ -142,17 +145,64 @@ func (LiveFactory) OpenLive(ctx context.Context, source practice.VerifiedSource)
 		}()
 		return nil
 	})
+	d.readClicks = js.FuncOf(func(_ js.Value, args []js.Value) any {
+		generation, sequence, start, count := args[0].String(), args[1].String(), args[2].Float(), args[3].Float()
+		resolve, reject := args[4], args[5]
+		d.reads.Add(1)
+		go func() {
+			defer d.reads.Done()
+			g, err := strconv.ParseUint(generation, 10, 64)
+			seq, seqErr := strconv.ParseUint(sequence, 10, 64)
+			if err != nil || seqErr != nil || strconv.FormatUint(g, 10) != generation || strconv.FormatUint(seq, 10) != sequence || !validLiveInteger(start) || !validLiveInteger(count) || count < 1 || count > 8192 {
+				reject.Invoke("invalid bounded beat window")
+				return
+			}
+			d.scheduleMu.Lock()
+			schedule, ok := d.schedules[seq]
+			d.scheduleMu.Unlock()
+			if !ok || schedule.Generation != g || start+count > float64(schedule.OutputEnd-schedule.OutputStart) {
+				reject.Invoke("beat window references unavailable schedule")
+				return
+			}
+			clicks, err := schedule.ClickWindow(d.lifetime, max(0, int64(start)-int64(d.info.SampleRate/100)), int64(start+count))
+			if err != nil {
+				reject.Invoke(err.Error())
+				return
+			}
+			if clicks == nil {
+				resolve.Invoke(js.Global().Get("Array").New())
+				return
+			}
+			data, err := json.Marshal(clicks)
+			if err != nil {
+				reject.Invoke(err.Error())
+				return
+			}
+			resolve.Invoke(js.Global().Get("JSON").Call("parse", string(data)))
+		}()
+		return nil
+	})
 	value, err := awaitLive(ctx, func(complete, failed js.Func) js.Value {
-		return js.Global().Call("riffineLiveOpen", map[string]any{"source": source.Handle, "channels": source.Info.Channels, "sampleRate": source.Info.SampleRate, "frames": source.Info.Frames}, d.read, complete, failed)
+		return js.Global().Call("riffineLiveOpen", map[string]any{"source": source.Handle, "channels": source.Info.Channels, "sampleRate": source.Info.SampleRate, "frames": source.Info.Frames}, d.read, d.readClicks, complete, failed)
 	})
 	if err != nil {
 		cancel()
 		d.reads.Wait()
 		d.read.Release()
+		d.readClicks.Release()
 		return nil, errors.Join(err, pcm.Close())
 	}
 	d.control = value
 	return d, nil
+}
+func validLiveInteger(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && math.Trunc(value) == value && value >= 0 && value <= 1<<53-1
+}
+func (d *liveDevice) SupportsCues() bool {
+	return d.control.Get("cuesSupported").Type() == js.TypeBoolean && d.control.Get("cuesSupported").Bool()
+}
+func (d *liveDevice) SupportsMetronome() bool {
+	return d.control.Get("metronomeSupported").Type() == js.TypeBoolean && d.control.Get("metronomeSupported").Bool()
 }
 func (d *liveDevice) OutputSampleRate() int { return d.info.SampleRate }
 func (d *liveDevice) call(ctx context.Context, method string, args any) (string, error) {
@@ -174,10 +224,31 @@ func (d *liveDevice) call(ctx context.Context, method string, args any) (string,
 }
 func (d *liveDevice) Reset(ctx context.Context, generation uint64) error {
 	_, err := d.call(ctx, "reset", map[string]any{"generation": strconv.FormatUint(generation, 10)})
+	if err == nil {
+		d.scheduleMu.Lock()
+		d.schedules = map[uint64]engine.Schedule{}
+		d.scheduleMu.Unlock()
+	}
 	return err
 }
 func (d *liveDevice) Schedule(ctx context.Context, s engine.Schedule) error {
-	_, err := d.call(ctx, "schedule", map[string]any{"generation": strconv.FormatUint(s.Generation, 10), "sequence": strconv.FormatUint(s.Sequence, 10), "source": s.Source, "startFrame": s.StartFrame, "endFrame": s.EndFrame, "outputStart": s.OutputStart, "outputEnd": s.OutputEnd, "speed": s.Speed, "pitch": s.Pitch, "edgeFadeFrames": s.EdgeFadeFrames})
+	d.scheduleMu.Lock()
+	d.schedules[s.Sequence] = s
+	d.scheduleMu.Unlock()
+	_, err := d.call(ctx, "schedule", map[string]any{"generation": strconv.FormatUint(s.Generation, 10), "sequence": strconv.FormatUint(s.Sequence, 10), "source": s.Source, "startFrame": s.StartFrame, "endFrame": s.EndFrame, "outputStart": s.OutputStart, "outputEnd": s.OutputEnd, "speed": s.Speed, "pitch": s.Pitch, "edgeFadeFrames": s.EdgeFadeFrames, "phase": s.Phase, "cueOffsetFrames": s.CueOffsetFrames, "clicks": s.Clicks, "clickLevel": s.ClickLevel, "metronome": s.BeatGrid != nil})
+	d.scheduleMu.Lock()
+	if err != nil {
+		delete(d.schedules, s.Sequence)
+	} else {
+		for len(d.schedules) > 2 {
+			oldest := s.Sequence
+			for seq := range d.schedules {
+				oldest = min(oldest, seq)
+			}
+			delete(d.schedules, oldest)
+		}
+	}
+	d.scheduleMu.Unlock()
 	return err
 }
 func (d *liveDevice) Start(ctx context.Context) error {
@@ -211,6 +282,7 @@ func (d *liveDevice) Close() error {
 		_, err := d.call(context.Background(), "close", struct{}{})
 		d.reads.Wait()
 		d.read.Release()
+		d.readClicks.Release()
 		d.closeErr = errors.Join(err, d.pcm.Close())
 	})
 	return d.closeErr

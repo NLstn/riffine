@@ -186,10 +186,32 @@ void exercise(const fs::path &path,bool borrowed=false){
  worker.reset();check(resource.position()==17,"worker closed caller handle or changed its cursor");
 }
 }
+void exerciseCues(const fs::path &path){
+ riffine_scheduled_worker *raw=nullptr;auto name=path.u8string();ok(riffine_scheduled_open(name.c_str(),&raw,error,sizeof(error)));Worker worker(raw,riffine_scheduled_close);
+ ok(riffine_scheduled_reset(raw,1,error,sizeof(error)));
+ const riffine_click_event clicks[]={{0,1,0},{24000,0,0}};
+ riffine_schedule count{1,1,12000,12000,0,38000,0,.6,3},rest{1,2,12000,12000,38000,98000,0,.65,3};
+ check(riffine_scheduled_submit_cue(raw,&count,3,10000,.7f,clicks,2,error,sizeof(error))!=0,"unknown cue accepted");
+ check(riffine_scheduled_submit_cue(raw,&count,1,10000,.7f,clicks,33,error,sizeof(error))!=0,"unbounded cue events accepted");
+ ok(riffine_scheduled_submit_cue(raw,&count,1,10000,.7f,clicks,2,error,sizeof(error)));
+ check(riffine_scheduled_submit_cue(raw,&rest,2,0,.7f,clicks,2,error,sizeof(error))!=0,"rest accepted clicks");
+ ok(riffine_scheduled_submit_cue(raw,&rest,2,0,0,nullptr,0,error,sizeof(error)));
+ std::array<float,226> block{},expected{};riffine_scheduled_block report{};uint64_t generated=0;double energy=0;
+ while(generated<38000){read(raw,block.data(),113,&report);check(report.sequence==1&&report.output_start==generated,"cue block identity changed");
+  std::fill(expected.begin(),expected.end(),0);ok(riffine_click_mix(1,2,48000,int64_t(10000+generated),report.frames,.7f,clicks,2,expected.data(),error,sizeof(error)));
+  for(size_t i=0;i<size_t(report.frames)*2;++i){check(block[i]==expected[i],"cue lost original click phase");energy+=block[i]*block[i];}generated+=report.frames;
+ }
+ check(energy>0,"count-in produced no click energy");auto audio=schedule(1,3,12000,36000,98000,.6,3);ok(riffine_scheduled_submit(raw,&audio,error,sizeof(error)));
+ generated=0;while(generated<60000){read(raw,block.data(),113,&report);check(report.sequence==2&&report.output_start==38000+generated,"rest clock changed");for(size_t i=0;i<size_t(report.frames)*2;++i)check(block[i]==0,"rest decoded source or clicks");generated+=report.frames;}
+ auto audioExpected=reference(path,audio);generated=0;while(generated<audio.output_end-audio.output_start){read(raw,block.data(),113,&report);check(report.sequence==3,"cue confused audio identity");for(size_t i=0;i<size_t(report.frames)*2;++i)check(block[i]==audioExpected[size_t(generated)*2+i],"audio changed after cues");generated+=report.frames;}
+ ok(riffine_scheduled_reset(raw,2,error,sizeof(error)));count.generation=2;count.sequence=4;count.output_end=36000;
+ ok(riffine_scheduled_submit_cue(raw,&count,1,12000,.7f,clicks,2,error,sizeof(error)));read(raw,block.data(),113,&report);
+ ok(riffine_scheduled_reset(raw,3,error,sizeof(error)));riffine_scheduled_info info{};ok(riffine_scheduled_info_get(raw,&info,error,sizeof(error)));check(info.pending==0,"reset retained pending cue");
+}
 int main(){
  auto root=fs::temp_directory_path()/fs::u8path("riffine-scheduled-音楽-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
  try{
-  check(fs::create_directory(root),"cannot create fixture directory");auto path=root/fs::u8path("ギター.wav");wav(path);exercise(path);exercise(path,true);exerciseRates(path);
+  check(fs::create_directory(root),"cannot create fixture directory");auto path=root/fs::u8path("ギター.wav");wav(path);exercise(path);exercise(path,true);exerciseRates(path);exerciseCues(path);
   for(const char *extension:{"flac","mp3"}){path=root/fs::u8path(std::string("ギター.")+extension);fs::copy_file(fs::path(RIFFINE_DECODE_FIXTURES)/(std::string("generated-stereo.")+extension),path);exercise(path);exercise(path,true);exerciseRates(path);}
   fs::remove_all(root);std::cout<<"bounded WAV/FLAC/MP3 scheduled worker: 2 cursors, exact kernel parity, 100 resets; no device/presentation evidence\n";return 0;
  }catch(const std::exception &e){std::cerr<<e.what()<<"\n";fs::remove_all(root);return 1;}

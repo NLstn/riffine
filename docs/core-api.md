@@ -225,7 +225,7 @@ position. [Validation and ownership](validation/waveform-detail.md).
 
 `adapters/binding.Session` exposes a version-1 bounded JSON bridge around an owned
 core session. Operations import/open, dispatch a strict shared command, request
-retained overview/detail windows, drain events, inspect snapshots and export
+retained overview/detail windows, drain events, inspect snapshots, save-as/save and export
 portable project JSON. Platform adapters provide resource/store ports; no product
 rules move into JavaScript. Close releases retained waveform resources. The browser
 worker uses selected immutable Files and advertises only its actual WAV capability;
@@ -277,3 +277,18 @@ per worker request, runs shared C++ DSP, and feeds a fixed shared AudioWorklet
 queue. Production browser sessions can advertise `streamPreview` when that
 processing/output port is loaded, while `liveTransport` remains false. See
 [browser preview validation](validation/browser-audio-preview.md).
+
+The binding `save_as` operation requires a `document` destination and uses the
+core's exclusive publication. It does not change the opened document/revision;
+reopen the new copy before in-place updates. `save` updates an opened document
+through an `UpdatingStore` and returns `saved: {revision, recovery}` plus a current
+snapshot. Saves do not consume edit sequences. Browser `browser:` handles address
+the IndexedDB host; downloads and recovery copies remain read-only. See
+[browser persistence and offline validation](validation/browser-persistence-offline.md).
+
+Project v5 practice plans optionally include `timing.CueDefinition`: independent
+count-in beats, fixed rest seconds, click level, metronome and a versioned source
+beat grid. Device capability checks precede plan selection. Transport snapshots
+expose `phase` and `phaseRemainingFrames` in `config.outputRate` units; these advance
+only on presentation acknowledgements. `phase_completed` events cannot count as
+traversals. See [cue scheduling and host limits](validation/practice-cues.md).

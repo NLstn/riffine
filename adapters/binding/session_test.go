@@ -104,3 +104,67 @@ func TestBindingRejectsMalformedAndCancelledRequests(t *testing.T) {
 		t.Fatal("closed bridge accepted request")
 	}
 }
+
+func TestBindingRevisionProtectedSaveAndRecovery(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	source, destination := filepath.Join(dir, "source.wav"), filepath.Join(dir, "saved.json")
+	var pcm bytes.Buffer
+	if err := audio.WriteTone(&pcm, .2, 440, 48000, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, pcm.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	host := filesystem.Host{}
+	service := practice.Service{Resources: host, Store: host, Decoder: audio.WAVDecoder{}}
+	call := func(bridge *Session, request Request) Response {
+		t.Helper()
+		data, _ := json.Marshal(request)
+		return bridge.Handle(ctx, data)
+	}
+	imported := New(service)
+	defer imported.Close()
+	if response := call(imported, Request{Version: 1, Type: "import", Source: source, Document: destination}); response.Error != nil {
+		t.Fatal(response)
+	}
+	if response := call(imported, Request{Version: 1, Type: "save_as"}); response.Error == nil {
+		t.Fatal("missing destination accepted")
+	}
+	if response := call(imported, Request{Version: 1, Type: "save"}); response.Error == nil || response.Error.Code != practice.UnsupportedCapability {
+		t.Fatal(response)
+	}
+	if response := call(imported, Request{Version: 1, Type: "save_as", Document: destination}); response.Error != nil {
+		t.Fatal(response)
+	}
+	previous, _ := os.ReadFile(destination)
+	if response := call(imported, Request{Version: 1, Type: "save_as", Document: destination}); response.Error == nil {
+		t.Fatal("save-as overwrote a project")
+	}
+	first, stale := New(service), New(service)
+	defer first.Close()
+	defer stale.Close()
+	for _, bridge := range []*Session{first, stale} {
+		if response := call(bridge, Request{Version: 1, Type: "open", Document: destination}); response.Error != nil {
+			t.Fatal(response)
+		}
+		if response := call(bridge, Request{Version: 1, Type: "command", Command: json.RawMessage(`{"version":1,"sequence":1,"type":"set_parameters","speed":0.6}`)}); response.Error != nil {
+			t.Fatal(response)
+		}
+	}
+	saved := call(first, Request{Version: 1, Type: "save"})
+	if saved.Error != nil || saved.Saved == nil || saved.Saved.Revision != saved.Snapshot.Revision || saved.Snapshot.Sequence != 1 {
+		t.Fatal(saved)
+	}
+	recovery, err := os.ReadFile(saved.Saved.Recovery)
+	if err != nil || !bytes.Equal(recovery, previous) {
+		t.Fatal("previous bytes were not retained", err)
+	}
+	conflict := call(stale, Request{Version: 1, Type: "save"})
+	if conflict.Error == nil || conflict.Error.Code != practice.RevisionConflict {
+		t.Fatal(conflict)
+	}
+	if response := call(stale, Request{Version: 1, Type: "export"}); response.Error != nil || !strings.Contains(response.Document, `"speed": 0.6`) {
+		t.Fatal("conflict discarded edits", response)
+	}
+}

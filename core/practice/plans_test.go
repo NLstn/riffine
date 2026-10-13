@@ -8,6 +8,7 @@ import (
 	"github.com/NLstn/riffine/core/engine"
 	"github.com/NLstn/riffine/core/ladder"
 	"github.com/NLstn/riffine/core/project"
+	"github.com/NLstn/riffine/core/timing"
 )
 
 func savedPlanSession(t *testing.T) (*Session, *sessionDevice) {
@@ -163,5 +164,82 @@ func TestSavedPlanDefinitionEditsDoNotMutateCurrentRun(t *testing.T) {
 	current = dispatchLive(t, s, Command{Type: "select_practice_plan", PlanID: &id})
 	if current.ActivePracticePlan.Label != "New name" || current.Transport.Plan.TotalLoops != 5 {
 		t.Fatal(current)
+	}
+}
+
+func TestCuePlanSnapshotOwnershipAndPresentedPhases(t *testing.T) {
+	s, d := savedPlanSession(t)
+	plans := s.Snapshot().Project.PracticePlans
+	plans[0].Cues = &timing.CueDefinition{Version: 1, CountInBeats: 4, RestSeconds: 2, ClickLevel: .7, Grid: &timing.Definition{Version: 1, SourceBPM: 120, BeatsPerBar: 4}}
+	dispatchLive(t, s, Command{Type: "set_practice_plans", PracticePlans: &plans})
+	id := "ladder"
+	snapshot := dispatchLive(t, s, Command{Type: "select_practice_plan", PlanID: &id})
+	snapshot.ActivePracticePlan.Cues.Grid.SourceBPM = 300
+	if s.Snapshot().ActivePracticePlan.Cues.Grid.SourceBPM != 120 {
+		t.Fatal("active cue metadata aliases snapshot")
+	}
+	dispatchLive(t, s, Command{Type: "play"})
+	count := d.schedules[0]
+	if count.Phase != "count_in" || len(count.Clicks) != 4 {
+		t.Fatal(count)
+	}
+	d.pending = []engine.OutputAcknowledgement{{Generation: count.Generation, Sequence: count.Sequence, ConsumedOutputFrame: count.OutputEnd}}
+	snapshot, err := s.PollTransport(context.Background())
+	if err != nil || snapshot.Transport.CompletedLoops != 0 || snapshot.Transport.Plan.CompletedLoops != 0 {
+		t.Fatal(snapshot, err)
+	}
+	audio := d.schedules[1]
+	d.pending = []engine.OutputAcknowledgement{{Generation: audio.Generation, Sequence: audio.Sequence, ConsumedOutputFrame: audio.OutputEnd}}
+	snapshot, err = s.PollTransport(context.Background())
+	if err != nil || snapshot.Transport.CompletedLoops != 1 || snapshot.Transport.Phase != "rest" {
+		t.Fatal(snapshot, err)
+	}
+	if snapshot.Transport.PhaseRemainingFrames != int64(snapshot.Transport.Config.OutputRate)*2 {
+		t.Fatal("fixed seconds were not propagated", snapshot)
+	}
+	if snapshot.Project.PracticePlans[0].Cues.RestSeconds != 2 {
+		t.Fatal("runtime changed saved cues")
+	}
+}
+
+type noCueDevice struct{ LiveDevice }
+type restOnlyDevice struct{ LiveDevice }
+
+func (restOnlyDevice) SupportsCues() bool { return true }
+
+type limitedCueFactory struct {
+	delegate LiveDeviceFactory
+	restOnly bool
+}
+
+func (f limitedCueFactory) OpenLive(ctx context.Context, source VerifiedSource) (LiveDevice, error) {
+	d, err := f.delegate.OpenLive(ctx, source)
+	if err != nil {
+		return nil, err
+	}
+	if f.restOnly {
+		return restOnlyDevice{d}, nil
+	}
+	return noCueDevice{d}, nil
+}
+func TestCueCapabilityFailureKeepsSessionAndDeviceUntouched(t *testing.T) {
+	for _, restOnly := range []bool{false, true} {
+		s, _, d, f := liveSession(t)
+		s.service.LiveDevice = limitedCueFactory{delegate: f, restOnly: restOnly}
+		annotations := project.Annotations{Regions: []project.Region{{ID: "phrase", Label: "Phrase", Start: .25, End: .75}}}
+		dispatchLive(t, s, Command{Type: "set_annotations", Annotations: &annotations})
+		plans := []project.PracticePlan{{ID: "ladder", Label: "Cued ladder", RegionID: "phrase", Ladder: ladder.Definition{StartSpeed: .6, TargetSpeed: 1, IncrementPoints: 5, LoopsPerStep: 4, EndBehavior: "stop"}, Cues: &timing.CueDefinition{Version: 1, CountInBeats: 4, RestSeconds: 2, ClickLevel: .7, Metronome: true, Grid: &timing.Definition{Version: 1, SourceBPM: 120, BeatsPerBar: 4}}}}
+		dispatchLive(t, s, Command{Type: "set_practice_plans", PracticePlans: &plans})
+		if err := s.AttachTransport(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		before := s.Snapshot()
+		generation := d.generation
+		id := "ladder"
+		_, err := s.Dispatch(context.Background(), Command{Version: APIVersion, Sequence: before.Sequence + 1, Type: "select_practice_plan", PlanID: &id})
+		errorCode(t, err, UnsupportedCapability)
+		if !reflect.DeepEqual(s.Snapshot(), before) || d.generation != generation || d.running {
+			t.Fatal("unsupported cue plan changed session or device")
+		}
 	}
 }

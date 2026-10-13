@@ -132,7 +132,8 @@ docs/            Implementation plan, ADRs and validation
 web/             React + TypeScript local music-library client
 ```
 
-See [the implementation plan](docs/implementation-plan.md),
+See [the maintained delivery roadmap](docs/roadmap.md),
+[the implementation plan](docs/implementation-plan.md),
 [architecture decision](docs/adr/0001-cli-first-core.md), and
 [third-party notices](THIRD_PARTY_NOTICES.md). Contributions: [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -140,7 +141,7 @@ See [the implementation plan](docs/implementation-plan.md),
 Portable session documents now support source-time regions, markers, notes,
 named loops and bookmarks. Version-1 documents migrate explicitly on read;
 `riffine annotate --project song.json --out annotated.json --annotations notes.json`
-saves a new v3 document. [Examples and migration details](docs/validation/portable-sessions.md).
+saves a new v5 document. [Examples and migration details](docs/validation/portable-sessions.md).
 
 `riffine save --project song.json --speed 0.6 --pitch 3` now saves to the same
 project with revision protection and a readable previous-revision recovery copy.
@@ -197,3 +198,19 @@ locally; typing and native button activation retain their usual keys.
 [live binding](docs/validation/browser-live-binding.md),
 [keyboard controls](docs/validation/browser-keyboard-controls.md) and
 [selection preview](docs/validation/browser-audio-preview.md).
+
+The browser now supports **Save on this device**, reopening verified originals,
+revision-protected saves and previous-version recovery. Production builds cache
+the UI and complete processing engines for offline use; wait for the offline-ready
+message before disconnecting. Generated core/DSP assets are required for a
+production build. See [device saves and offline checks](docs/validation/browser-persistence-offline.md).
+
+Waveform A/B handles support dragging and source-frame keyboard adjustments.
+Saved phrases can be updated/removed, and saved markers are visible/editable through
+the shared commands. See [selection controls](docs/validation/browser-selection-controls.md).
+
+Saved speed ladders now support count-in, fixed-second rest gaps and a browser
+metronome under **Preparation and timing**. BPM means the recording’s original
+tempo; click spacing follows song speed, while rest seconds stay fixed.
+Project v5 preserves these options and migrates v1–v4 explicitly.
+[Timing workflow, validation and host limits](docs/validation/practice-cues.md).

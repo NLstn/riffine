@@ -56,6 +56,8 @@ type Capabilities struct {
 	OfflineRender bool     `json:"offlineRender"`
 	LiveTransport bool     `json:"liveTransport"`
 	StreamPreview bool     `json:"streamPreview,omitempty"`
+	PracticeCues  bool     `json:"practiceCues,omitempty"`
+	Metronome     bool     `json:"metronome,omitempty"`
 }
 
 // Command sequences start at 1, are contiguous and apply only on success.
@@ -194,8 +196,15 @@ func (s *Session) snapshot() Snapshot {
 		snapshot.Transport = &transport
 		snapshot.State = transport.State
 		snapshot.Capabilities.LiveTransport = true
+		if device, ok := s.live.device.(engine.CueDevice); ok {
+			snapshot.Capabilities.PracticeCues = device.SupportsCues()
+		}
+		if device, ok := s.live.device.(engine.MetronomeDevice); ok {
+			snapshot.Capabilities.Metronome = device.SupportsMetronome()
+		}
 		if s.live.activePlan != nil {
 			plan := *s.live.activePlan
+			plan.Cues = plan.Cues.Clone()
 			snapshot.ActivePracticePlan = &plan
 		}
 	}

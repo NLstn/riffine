@@ -40,9 +40,16 @@ int riffine_scheduled_control(uint64_t handle){
    auto q=decode(bytes.data());
    if(q[0]!=magic||q[1]!=2||last==UINT64_MAX||q[2]!=last+1)throw std::runtime_error("invalid native control envelope");
    last=q[2];int status=0;error[0]=0;
-   bool reserved=false;for(unsigned i=13;i<16;++i)reserved|=q[i]!=0;
-   if(q[3]!=3)for(unsigned i=5;i<13;++i)reserved|=q[i]!=0;
-   if(q[3]!=2&&q[3]!=3&&q[3]!=5)reserved|=q[4]!=0;
+   bool reserved=false;if(q[3]!=6)for(unsigned i=13;i<16;++i)reserved|=q[i]!=0;
+   if(q[3]!=3&&q[3]!=6)for(unsigned i=5;i<13;++i)reserved|=q[i]!=0;
+   if(q[3]!=2&&q[3]!=3&&q[3]!=5&&q[3]!=6)reserved|=q[4]!=0;
+   std::array<riffine_click_event,32> clicks{};
+   if(q[3]==6){
+    if(q[14]>32)throw std::runtime_error("cue event payload exceeds bound");
+    std::array<unsigned char,512> payload{};const auto bytes=size_t(q[14])*16;
+    if(std::fread(payload.data(),1,bytes,stdin)!=bytes)throw std::runtime_error("truncated cue event payload");
+    for(unsigned i=0;i<q[14];++i){uint64_t position=0,accent=0;for(unsigned b=0;b<8;++b){position|=uint64_t(payload[i*16+b])<<(b*8);accent|=uint64_t(payload[i*16+8+b])<<(b*8);}clicks[i]={int64_t(position),uint32_t(accent),uint32_t(accent>>32)};}
+   }
    if(reserved){status=1;std::snprintf(error,sizeof(error),"unexpected native control fields");}
    else if(q[3]==1){} // info contains no completion or clock claim
    else if(q[3]==2)status=riffine_scheduled_reset(raw,q[4],error,sizeof(error));
@@ -50,6 +57,10 @@ int riffine_scheduled_control(uint64_t handle){
    else if(q[3]==3){
     riffine_schedule schedule{q[4],q[5],q[6],q[7],q[8],q[9],q[10],floating(q[11]),floating(q[12])};
     status=riffine_scheduled_submit(raw,&schedule,error,sizeof(error));
+   }else if(q[3]==6){
+    if(q[13]>UINT32_MAX){status=1;std::snprintf(error,sizeof(error),"invalid cue kind");}
+    else{riffine_schedule schedule{q[4],q[5],q[6],q[6],q[8],q[9],q[10],floating(q[11]),floating(q[12])};
+     status=riffine_scheduled_submit_cue(raw,&schedule,uint32_t(q[13]),q[7],float(floating(q[15])),clicks.data(),uint32_t(q[14]),error,sizeof(error));}
    }else if(q[3]!=4){status=1;std::snprintf(error,sizeof(error),"unknown native control operation");}
    reply(raw,q[2],status,error);
    if(q[3]==4&&!status)return 0;

@@ -13,7 +13,7 @@ import (
 	"github.com/NLstn/riffine/core/audio"
 )
 
-const Version = 4
+const Version = 5
 
 type Loop struct {
 	Enabled bool    `json:"enabled"`
@@ -74,7 +74,7 @@ func (p Project) Validate() error {
 	return p.validatePlans()
 }
 
-// New builds a version-4 document. Reference is a host-produced locator;
+// New builds a version-5 document. Reference is a host-produced locator;
 // content identity is the fingerprint and metadata, never the locator.
 func New(name, reference string, info audio.Info) (Project, error) {
 	if info.Encoding == "" && (info.Bits == 16 || info.Bits == 24 || info.Bits == 32) {
@@ -102,8 +102,8 @@ func Decode(r io.Reader) (Project, error) {
 	if err = json.Unmarshal(b, &header); err != nil {
 		return Project{}, err
 	}
-	if header.Version != 1 && header.Version != 2 && header.Version != 3 && header.Version != Version {
-		return Project{}, fmt.Errorf("unsupported project version %d (supported: 1, 2, 3 and %d)", header.Version, Version)
+	if header.Version != 1 && header.Version != 2 && header.Version != 3 && header.Version != 4 && header.Version != Version {
+		return Project{}, fmt.Errorf("unsupported project version %d (supported: 1–4 and %d)", header.Version, Version)
 	}
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
@@ -138,17 +138,30 @@ func Decode(r io.Reader) (Project, error) {
 		p = Project{Version: Version, Name: old.Name, Track: old.Track.current(), Settings: old.Settings, Annotations: old.Annotations}
 	} else if header.Version == 3 {
 		var old struct {
-			Version       int            `json:"version"`
-			Name          string         `json:"name"`
-			Track         legacyTrack    `json:"track"`
-			Settings      Settings       `json:"settings"`
-			Annotations   Annotations    `json:"annotations"`
-			PracticePlans []PracticePlan `json:"practicePlans,omitempty"`
+			Version       int                  `json:"version"`
+			Name          string               `json:"name"`
+			Track         legacyTrack          `json:"track"`
+			Settings      Settings             `json:"settings"`
+			Annotations   Annotations          `json:"annotations"`
+			PracticePlans []legacyPracticePlan `json:"practicePlans,omitempty"`
 		}
 		if err = dec.Decode(&old); err != nil {
 			return Project{}, err
 		}
-		p = Project{Version: Version, Name: old.Name, Track: old.Track.current(), Settings: old.Settings, Annotations: old.Annotations, PracticePlans: old.PracticePlans}
+		p = Project{Version: Version, Name: old.Name, Track: old.Track.current(), Settings: old.Settings, Annotations: old.Annotations, PracticePlans: migratePlans(old.PracticePlans)}
+	} else if header.Version == 4 {
+		var old struct {
+			Version       int                  `json:"version"`
+			Name          string               `json:"name"`
+			Track         Track                `json:"track"`
+			Settings      Settings             `json:"settings"`
+			Annotations   Annotations          `json:"annotations"`
+			PracticePlans []legacyPracticePlan `json:"practicePlans,omitempty"`
+		}
+		if err = dec.Decode(&old); err != nil {
+			return Project{}, err
+		}
+		p = Project{Version: Version, Name: old.Name, Track: old.Track, Settings: old.Settings, Annotations: old.Annotations, PracticePlans: migratePlans(old.PracticePlans)}
 	} else {
 		if err = dec.Decode(&p); err != nil {
 			return Project{}, err

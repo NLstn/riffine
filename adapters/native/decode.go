@@ -26,6 +26,7 @@ type Decoder struct {
 	borrowedPreview  bool
 	borrowedRender   bool
 	scheduledControl int
+	scheduledCues    int
 }
 
 func NewDecoder(ctx context.Context, adapter Adapter) (Decoder, error) {
@@ -41,6 +42,7 @@ func NewDecoder(ctx context.Context, adapter Adapter) (Decoder, error) {
 		BorrowedPreview  bool     `json:"borrowedPreview"`
 		BorrowedRender   bool     `json:"borrowedRender"`
 		ScheduledControl int      `json:"scheduledControl"`
+		ScheduledCues    int      `json:"scheduledCues"`
 	}
 	if err = json.Unmarshal(data, &report); err != nil {
 		return result, err
@@ -48,7 +50,7 @@ func NewDecoder(ctx context.Context, adapter Adapter) (Decoder, error) {
 	if report.ABI != 1 || !report.BorrowedSources || len(report.Formats) != 3 || report.Formats[0] != "wav-pcm" || report.Formats[1] != "flac" || report.Formats[2] != "mp3" {
 		return result, errors.New("native decoder protocol/capabilities are unsupported; rebuild the helper with borrowed-source support")
 	}
-	return Decoder{adapter: adapter, formats: append([]string(nil), report.Formats...), borrowedPreview: report.BorrowedPreview, borrowedRender: report.BorrowedRender, scheduledControl: report.ScheduledControl}, nil
+	return Decoder{adapter: adapter, formats: append([]string(nil), report.Formats...), borrowedPreview: report.BorrowedPreview, borrowedRender: report.BorrowedRender, scheduledControl: report.ScheduledControl, scheduledCues: report.ScheduledCues}, nil
 }
 func (d Decoder) Formats() []string { return append([]string(nil), d.formats...) }
 func (a Adapter) capture(ctx context.Context, args ...string) ([]byte, error) {

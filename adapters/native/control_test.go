@@ -8,6 +8,7 @@ import (
 	"github.com/NLstn/riffine/core/audio"
 	"github.com/NLstn/riffine/core/engine"
 	"github.com/NLstn/riffine/core/resource"
+	"github.com/NLstn/riffine/core/timing"
 	"io"
 	"math"
 	"os"
@@ -477,5 +478,63 @@ func TestControlRejectsVersionOneHelper(t *testing.T) {
 			worker.Close()
 		}
 		t.Fatal("accepted incompatible scheduled-control protocol")
+	}
+}
+
+func TestNativeControlSchedulesBoundedCuePayloads(t *testing.T) {
+	helper := os.Getenv("RIFFINE_AUDIO_HELPER")
+	if helper == "" {
+		t.Skip("set RIFFINE_AUDIO_HELPER for mandatory native integration")
+	}
+	reader, info := controlFixture(t)
+	worker, err := (Adapter{Executable: helper}).OpenScheduledWorker(context.Background(), reader, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer worker.Close()
+	if err = worker.Reset(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	count := engine.Schedule{Generation: 1, Sequence: 1, Source: "source", StartFrame: 0, EndFrame: 0, OutputStart: 0, OutputEnd: 48000, Speed: .6, Pitch: 3, Phase: "count_in", CueOffsetFrames: 12000, ClickLevel: .7, Clicks: []timing.Click{{OutputFrame: 0, Accent: true}, {OutputFrame: 40000, Accent: false}}}
+	if err = worker.Submit(context.Background(), count); err != nil {
+		t.Fatal(err)
+	}
+	rest := engine.Schedule{Generation: 1, Sequence: 2, Source: "source", StartFrame: 0, EndFrame: 0, OutputStart: 48000, OutputEnd: 108000, Speed: .65, Pitch: 3, Phase: "rest"}
+	if err = worker.Submit(context.Background(), rest); err != nil {
+		t.Fatal(err)
+	}
+	current, err := worker.Info(context.Background())
+	if err != nil || current.Pending != 2 || current.LastSequence != 2 {
+		t.Fatal(current, err)
+	}
+	if err = worker.Reset(context.Background(), 2); err != nil {
+		t.Fatal(err)
+	}
+	invalid := count
+	invalid.Generation = 2
+	invalid.Sequence = 3
+	invalid.EndFrame = 1
+	if err = worker.Submit(context.Background(), invalid); err == nil {
+		t.Fatal("nonconstant cue anchor accepted")
+	}
+	current, err = worker.Info(context.Background())
+	if err != nil || current.Pending != 0 {
+		t.Fatal("invalid cue corrupted control stream", current, err)
+	}
+	invalid = count
+	invalid.Generation = 2
+	invalid.Sequence = 3
+	invalid.ClickLevel = 2
+	if err = worker.Submit(context.Background(), invalid); err == nil {
+		t.Fatal("invalid click level accepted")
+	}
+	current, err = worker.Info(context.Background())
+	if err != nil || current.Pending != 0 {
+		t.Fatal("rejected payload lost protocol alignment", current, err)
+	}
+	count.Generation = 2
+	count.Sequence = 3
+	if err = worker.Submit(context.Background(), count); err != nil {
+		t.Fatal("valid payload after rejection failed", err)
 	}
 }

@@ -13,10 +13,13 @@ struct ScheduledSlot {
  riffine_decoder *decoder=nullptr;
  riffine_rate_selection *selection=nullptr;
  riffine_schedule schedule{};
- uint64_t remaining=0,generated=0;
+ uint64_t remaining=0,generated=0,cue_offset=0;
+ uint32_t cue_kind=0,click_count=0;
+ float click_level=0;
+ std::array<riffine_click_event,32> clicks{};
  std::array<float,1024> input{};
  ~ScheduledSlot(){clear();riffine_decoder_close(decoder);}
- void clear(){riffine_rate_selection_destroy(selection);selection=nullptr;remaining=generated=0;}
+ void clear(){riffine_rate_selection_destroy(selection);selection=nullptr;remaining=generated=cue_offset=0;cue_kind=click_count=0;click_level=0;}
 };
 struct riffine_scheduled_worker {
  std::array<ScheduledSlot,2> slots;
@@ -106,6 +109,25 @@ int riffine_scheduled_submit(riffine_scheduled_worker *w,const riffine_schedule 
   ++w->info.pending;w->info.last_sequence=s.sequence;w->next_output=s.output_end;w->failed=false;
  });
 }
+int riffine_scheduled_submit_cue(riffine_scheduled_worker *w,const riffine_schedule *schedule,
+ uint32_t kind,uint64_t offset,float level,const riffine_click_event *events,uint32_t count,char *error,size_t size){
+ return boundary(error,size,[&]{
+  require(w&&!w->failed&&schedule,"worker failed or missing cue schedule");const auto &s=*schedule;
+  require(w->info.generation&&s.generation==w->info.generation&&s.sequence>w->info.last_sequence&&w->info.pending<2,"invalid cue generation, sequence or queue capacity");
+  require((kind==1||kind==2)&&s.start_frame==s.end_frame&&s.start_frame<w->info.source_frames&&s.edge_fade_frames==0,"invalid cue phase or source anchor");
+  require(std::isfinite(s.speed)&&s.speed>=.25&&s.speed<=2&&std::isfinite(s.semitones)&&s.semitones>=-12&&s.semitones<=12,"invalid cue parameters");
+  require(s.output_start==w->next_output&&s.output_end>s.output_start&&s.output_end<=uint64_t(INT64_MAX),"invalid cue output coordinates");
+  const auto length=s.output_end-s.output_start;
+  require(offset<=uint64_t(w->output_rate)*120&&length<=uint64_t(w->output_rate)*120-offset,"cue duration exceeds 120 seconds");
+  require(std::isfinite(level)&&level>=0&&level<=1&&count<=32&&(!count||events),"invalid cue click controls");
+  require(kind!=2||(!count&&level==0),"rest phases cannot contain clicks");
+  for(uint32_t i=0;i<count;++i)require(events[i].output_frame>=0&&uint64_t(events[i].output_frame)<offset+length&&events[i].accent<=1&&!events[i].reserved&&(!i||events[i].output_frame>events[i-1].output_frame),"invalid bounded cue events");
+  auto &slot=w->slots[(w->front+w->info.pending)%2];slot.clear();slot.schedule=s;
+  slot.cue_kind=kind;slot.cue_offset=offset;slot.click_level=level;slot.click_count=count;
+  if(count)std::copy(events,events+count,slot.clicks.begin());
+  ++w->info.pending;w->info.last_sequence=s.sequence;w->next_output=s.output_end;
+ });
+}
 int riffine_scheduled_read(riffine_scheduled_worker *w,float *output,uint32_t capacity,riffine_scheduled_block *result,char *error,size_t size){
  if(result)*result={};
  return boundary(error,size,[&]{
@@ -113,7 +135,11 @@ int riffine_scheduled_read(riffine_scheduled_worker *w,float *output,uint32_t ca
   if(!w->info.pending)return;
   auto &slot=w->slots[w->front];char text[512];uint32_t written=0;
   w->failed=true;
-  while(written<capacity){
+  if(slot.cue_kind){
+   written=uint32_t(std::min<uint64_t>(capacity,slot.schedule.output_end-slot.schedule.output_start-slot.generated));
+   std::fill(output,output+size_t(written)*w->info.channels,0.0f);
+   if(slot.cue_kind==1)ok(riffine_click_mix_window(1,w->info.channels,w->output_rate,int64_t(slot.cue_offset+slot.generated),written,slot.click_level,slot.clicks.data(),slot.click_count,output,int64_t(slot.cue_offset+slot.schedule.output_end-slot.schedule.output_start),text,sizeof(text)),text);
+  }else while(written<capacity){
    uint32_t count=0,needs_input=0;
    ok(riffine_rate_selection_read(slot.selection,output+size_t(written)*w->info.channels,capacity-written,&count,&needs_input,text,sizeof(text)),text);
    written+=count;

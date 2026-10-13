@@ -34,7 +34,7 @@ bin/riffine save --project song.json --speed 0.6 --pitch 3
 ```
 
 The output names the committed revision and previous valid recovery document.
-`save` without settings also explicitly migrates a loaded v1 document to v3. Other
+`save` without settings also explicitly migrates a loaded v1 document to the current v5 schema. Other
 CLI outputs remain exclusive. All stored notes, markers and regions are preserved.
 
 Open the reported recovery document using `inspect --project <recovery>` or the

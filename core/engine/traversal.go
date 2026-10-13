@@ -16,6 +16,7 @@ type Traversal struct {
 }
 type TraversalCompletion struct {
 	Type                string `json:"type"`
+	Phase               string `json:"phase,omitempty"`
 	Generation          uint64 `json:"generation"`
 	Sequence            uint64 `json:"sequence"`
 	StartFrame          int64  `json:"startFrame"`
@@ -24,8 +25,11 @@ type TraversalCompletion struct {
 }
 
 func NewTraversal(s Schedule) (*Traversal, error) {
-	if s.Generation == 0 || s.Sequence == 0 || s.Source == "" || s.StartFrame < 0 || s.EndFrame <= s.StartFrame || s.OutputStart < 0 || s.OutputEnd <= s.OutputStart || math.IsNaN(s.Speed) || math.IsInf(s.Speed, 0) || s.Speed < .25 || s.Speed > 2 || math.IsNaN(s.Pitch) || math.IsInf(s.Pitch, 0) || s.Pitch < -12 || s.Pitch > 12 || s.EdgeFadeFrames < 0 || s.EdgeFadeFrames > s.OutputEnd-s.OutputStart {
+	if s.Generation == 0 || s.Sequence == 0 || s.Source == "" || s.StartFrame < 0 || (s.Audio() && s.EndFrame <= s.StartFrame || !s.Audio() && s.EndFrame != s.StartFrame) || s.OutputStart < 0 || s.OutputEnd <= s.OutputStart || math.IsNaN(s.Speed) || math.IsInf(s.Speed, 0) || s.Speed < .25 || s.Speed > 2 || math.IsNaN(s.Pitch) || math.IsInf(s.Pitch, 0) || s.Pitch < -12 || s.Pitch > 12 || s.EdgeFadeFrames < 0 || s.EdgeFadeFrames > s.OutputEnd-s.OutputStart {
 		return nil, errors.New("invalid traversal schedule")
+	}
+	if !s.Audio() && (s.Phase != "count_in" && s.Phase != "rest" || s.CueOffsetFrames < 0 || s.EdgeFadeFrames != 0) {
+		return nil, errors.New("invalid cue traversal schedule")
 	}
 	return &Traversal{schedule: s, consumed: s.OutputStart}, nil
 }
@@ -46,5 +50,9 @@ func (t *Traversal) Acknowledge(a OutputAcknowledgement) (*TraversalCompletion, 
 		return nil, nil
 	}
 	t.completed = true
-	return &TraversalCompletion{Type: "traversal_completed", Generation: s.Generation, Sequence: s.Sequence, StartFrame: s.StartFrame, EndFrame: s.EndFrame, ConsumedOutputFrame: t.consumed}, nil
+	kind := "traversal_completed"
+	if !s.Audio() {
+		kind = "phase_completed"
+	}
+	return &TraversalCompletion{Type: kind, Phase: s.Phase, Generation: s.Generation, Sequence: s.Sequence, StartFrame: s.StartFrame, EndFrame: s.EndFrame, ConsumedOutputFrame: t.consumed}, nil
 }
