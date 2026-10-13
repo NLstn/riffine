@@ -218,7 +218,7 @@ function App() {
         {notice && phase === 'idle' && <div className="notice page-notice" role="status">{notice}</div>}
 
         <button type="button" className="primary-button" onClick={() => { stopPlayback(); setPracticeSource(undefined); setPracticeKey(value => value + 1); setPracticeOpen(true); }}>Open practice workspace</button>
-        <p className="heading-subtitle">Practice with PCM WAV, MP3 and FLAC tracks. Your audio stays on this device.</p>
+        <p className="heading-subtitle">Practice with WAV, MP3, FLAC, M4A and Opus tracks. Your audio stays on this device.</p>
         {practiceOpen && <PracticeWorkspace key={practiceKey} source={practiceSource} onClose={() => setPracticeOpen(false)} />}
 
         {phase === 'idle' ? (

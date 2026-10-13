@@ -19,3 +19,6 @@ web/public/practice/licenses/
 
 # Generated browser MP3 demo copied from the licensed native fixture.
 /web/public/practice/demo.mp3
+
+# Pinned browser M4A/Opus decoder and corresponding sources, copied from npm.
+/web/public/practice/media/

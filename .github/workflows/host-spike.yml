@@ -110,6 +110,9 @@ jobs:
           git -C "$RUNNER_TEMP/riffine-emsdk" checkout eff90ca04a3785f571a8095b3a42b63799cf384a
           "$RUNNER_TEMP/riffine-emsdk/emsdk" install 4.0.14
           "$RUNNER_TEMP/riffine-emsdk/emsdk" activate 4.0.14
+      - run: npm ci
+        working-directory: web
+      - run: node scripts/build-browser-media.mjs
       - name: Compare native and worker WASM streaming DSP
         run: |
           source "$RUNNER_TEMP/riffine-emsdk/emsdk_env.sh"
@@ -129,6 +132,9 @@ jobs:
           RIFFINE_LIVE_SOURCE=native/testdata/generated-stereo.mp3 node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-mp3.json
           RIFFINE_LIVE_SOURCE=native/testdata/generated-stereo.mp3 RIFFINE_LIVE_PLAN=1 node scripts/check-browser-live-binding.mjs > build/browser-dsp/saved-plan-mp3.json
           RIFFINE_LIVE_SOURCE=native/testdata/generated-stereo.flac node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-flac.json
+          RIFFINE_LIVE_SOURCE=native/testdata/generated-stereo.m4a node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-m4a.json
+          RIFFINE_LIVE_SOURCE=native/testdata/generated-stereo.opus node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-opus.json
+          RIFFINE_LIVE_SOURCE=native/testdata/generated-stereo.opus RIFFINE_LIVE_PLAN=1 node scripts/check-browser-live-binding.mjs > build/browser-dsp/saved-plan-opus.json
           node scripts/check-browser-preview.mjs > build/browser-dsp/preview.json
           node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-binding.json
           RIFFINE_LIVE_ACTIONS=1 node scripts/check-browser-live-binding.mjs > build/browser-dsp/practice-actions.json
@@ -148,7 +154,10 @@ jobs:
             build/browser-dsp/codecs.json
             build/browser-dsp/live-mp3.json
             build/browser-dsp/live-flac.json
+            build/browser-dsp/live-m4a.json
+            build/browser-dsp/live-opus.json
             build/browser-dsp/saved-plan-mp3.json
+            build/browser-dsp/saved-plan-opus.json
             build/browser-dsp/schedules.json
             build/browser-dsp/rate-selection.json
             build/browser-dsp/practice-actions.json

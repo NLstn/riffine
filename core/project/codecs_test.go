@@ -30,7 +30,7 @@ func TestVersionThreeCodecMigration(t *testing.T) {
 	}
 }
 func TestCodecMetadataValidation(t *testing.T) {
-	for _, codec := range []string{"flac", "mp3"} {
+	for _, codec := range []string{"flac", "mp3", "aac", "alac", "opus"} {
 		p := fixture(t)
 		p.Track.Audio.Encoding = codec
 		p.Track.Audio.Bits = 0
@@ -47,6 +47,12 @@ func TestCodecMetadataValidation(t *testing.T) {
 		wrong.Bits = 16
 		if p.VerifyIdentity(wrong) == nil {
 			t.Fatal("codec change matched saved identity")
+		}
+		if codec == "mp3" || codec == "aac" || codec == "opus" {
+			p.Track.Audio.Bits = 16
+			if p.Validate() == nil {
+				t.Fatalf("%s accepted fixed PCM precision", codec)
+			}
 		}
 	}
 	p := fixture(t)
