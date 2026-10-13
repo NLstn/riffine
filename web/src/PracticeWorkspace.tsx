@@ -46,21 +46,40 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
   if (response.window) setWave(response.window);
   return response;
  };
- const run = async (action: () => Promise<void>, message = 'Working locally…') => { if (operation.current) return; operation.current = true; setBusy(true); setBusyLabel(message); setError(''); try { await action(); } catch (failure) { const message = String(failure instanceof Error ? failure.message : failure); setError(message); setStatus(message.startsWith('cancelled:') ? 'Operation cancelled.' : 'Operation could not finish.'); } finally { operation.current = false; setBusy(false); } };
+ const run = async (action: () => Promise<void>, message = 'Working locally…') => {
+  const client = facade.current;
+  if (!client || operation.current) return;
+  operation.current = true; setBusy(true); setBusyLabel(message); setError('');
+  try { await action(); }
+  catch (failure) {
+   // Effect replay may have disposed this client and started a new import.
+   // Its late rejection must not fail or unlock the new client's operation.
+   if (facade.current !== client) return;
+   const message = String(failure instanceof Error ? failure.message : failure);
+   setError(message); setStatus(message.startsWith('cancelled:') ? 'Operation cancelled.' : 'Operation could not finish.');
+  } finally { if (facade.current === client) { operation.current = false; setBusy(false); } }
+ };
  const open = async (original: File, saved?: File) => {
   const client = facade.current;
   if (!client) return;
   setWave(undefined); setDetailView(false);
-  const result = install(await client.open(original, saved), true);
+  const opened = await client.open(original, saved);
+  if (facade.current !== client) return;
+  const result = install(opened, true);
   if (result.snapshot) {
-   install(await client.waveform(0, result.snapshot.project.track.audio.frames), false);
+   const waveform = await client.waveform(0, result.snapshot.project.track.audio.frames);
+   if (facade.current !== client) return;
+   install(waveform, false);
    setStatus(saved ? 'Saved project reopened and original identity verified.' : 'Original fingerprinted. Practice changes stay local.');
   }
  };
  useEffect(() => {
   const client = createFacade(); facade.current = client;
   if (source) void run(() => open(source));
-  return () => { client.dispose(); facade.current = null; };
+  return () => {
+   facade.current = null; operation.current = false;
+   client.dispose();
+  };
   // One worker per mounted workspace. Injected facades are fixed for its lifetime.
   // eslint-disable-next-line react-hooks/exhaustive-deps
  }, []);
