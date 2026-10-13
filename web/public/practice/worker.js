@@ -1,4 +1,6 @@
 // A local worker owns File resources, core state and analysis. No realtime audio.
+const diagnosticPrefix = `[riffine:practice-worker:${self.name || 'unnamed'}]`;
+console.info(`${diagnosticPrefix} loading runtime`);
 importScripts('./wasm_exec.js');
 const go = new Go();
 const codecReady = import('./codec-port.mjs');
@@ -19,11 +21,13 @@ self.onmessage = (event) => {
 (async () => {
   try {
     // Editing remains available when optional compiled processing assets are absent.
-    try { const preview = await import('./preview-worker.mjs'); await preview.ready; self.riffineCodecOpen = (await codecReady).openCodec; self.riffinePreviewRun = preview.run; const live = await import('./live-worker.mjs'); liveReceive = live.receive; self.riffineLiveOpen = live.open; } catch { self.riffinePreviewRun = undefined; }
+    try { const preview = await import('./preview-worker.mjs'); await preview.ready; self.riffineCodecOpen = (await codecReady).openCodec; self.riffinePreviewRun = preview.run; const live = await import('./live-worker.mjs'); liveReceive = live.receive; self.riffineLiveOpen = live.open; console.info(`${diagnosticPrefix} processing assets ready`); } catch (error) { self.riffinePreviewRun = undefined; console.warn(`${diagnosticPrefix} processing assets unavailable`, error); }
     await codecReady;
+    console.info(`${diagnosticPrefix} loading shared core`);
     const response = await fetch('./core.wasm');
     if (!response.ok) throw new Error('Shared practice core is missing. Run the browser build script.');
     const result = await WebAssembly.instantiate(await response.arrayBuffer(), go.importObject);
-    void go.run(result.instance).catch(error => self.postMessage({ type: 'fatal', message: String(error) }));
-  } catch (error) { self.postMessage({ type: 'fatal', message: String(error) }); }
+    console.info(`${diagnosticPrefix} starting shared core`);
+    void go.run(result.instance).catch(error => { console.error(`${diagnosticPrefix} shared core failed`, error); self.postMessage({ type: 'fatal', message: String(error) }); });
+  } catch (error) { console.error(`${diagnosticPrefix} initialization failed`, error); self.postMessage({ type: 'fatal', message: String(error) }); }
 })();

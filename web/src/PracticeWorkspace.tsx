@@ -55,8 +55,9 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
    // Effect replay may have disposed this client and started a new import.
    // Its late rejection must not fail or unlock the new client's operation.
    if (facade.current !== client) return;
-   const message = String(failure instanceof Error ? failure.message : failure);
-   setError(message); setStatus(message.startsWith('cancelled:') ? 'Operation cancelled.' : 'Operation could not finish.');
+   console.error('[riffine:practice] workspace operation failed', { operation: message, encoding: snapshot?.project.track.audio.encoding }, failure);
+   const errorMessage = String(failure instanceof Error ? failure.message : failure);
+   setError(errorMessage); setStatus(errorMessage.startsWith('cancelled:') ? 'Operation cancelled.' : 'Operation could not finish.');
   } finally { if (facade.current === client) { operation.current = false; setBusy(false); } }
  };
  const open = async (original: File, saved?: File) => {
@@ -74,8 +75,15 @@ export default function PracticeWorkspace({ source, onClose, createFacade = () =
   }
  };
  useEffect(() => {
-  const client = createFacade(); facade.current = client;
-  if (source) void run(() => open(source));
+  let client: PracticeFacade;
+  try { client = createFacade(); }
+  catch (failure) {
+   console.error('[riffine:practice] workspace initialization failed', failure);
+   setError(String(failure instanceof Error ? failure.message : failure)); setStatus('Practice could not start.');
+   return;
+  }
+  facade.current = client;
+  if (source) void run(() => open(source), 'Opening library audio…');
   return () => {
    facade.current = null; operation.current = false;
    client.dispose();
