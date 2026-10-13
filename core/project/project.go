@@ -206,9 +206,9 @@ func validCodec(i audio.Info) bool {
 	switch i.Encoding {
 	case "wav-pcm":
 		return i.Bits == 16 || i.Bits == 24 || i.Bits == 32
-	case "flac":
+	case "flac", "alac":
 		return i.Bits == 0 || (i.Bits >= 4 && i.Bits <= 32)
-	case "mp3":
+	case "mp3", "aac", "opus":
 		return i.Bits == 0
 	}
 	return false

@@ -16,30 +16,36 @@ import (
 )
 
 // Decoder keeps original compressed identity and source-frame coordinates.
-// A separate cancellable worker owns each bounded miniaudio decoding cursor.
+// A separate cancellable worker owns each bounded decoding cursor.
 type Decoder struct{}
 
 func (Decoder) Formats() []string {
 	if js.Global().Get("riffineCodecOpen").Type() == js.TypeFunction {
-		return []string{"wav-pcm", "mp3", "flac"}
+		return []string{"wav-pcm", "mp3", "flac", "aac", "alac", "opus"}
 	}
 	return []string{"wav-pcm"}
 }
 func sourceCodec(r resource.Reader) (int, error) {
-	var header [4]byte
+	var header [12]byte
 	if _, err := r.ReadAt(header[:], 0); err != nil {
 		return 0, err
 	}
-	if string(header[:]) == "RIFF" {
+	if string(header[:4]) == "RIFF" {
 		return 0, nil
 	}
-	if string(header[:]) == "fLaC" {
+	if string(header[:4]) == "fLaC" {
 		return 2, nil
 	}
 	if string(header[:3]) == "ID3" || (header[0] == 255 && header[1]&224 == 224) {
 		return 1, nil
 	}
-	return 0, errors.New("unsupported practice audio: choose PCM WAV, MP3 or FLAC")
+	if string(header[4:8]) == "ftyp" {
+		return 3, nil
+	}
+	if string(header[:4]) == "OggS" {
+		return 4, nil
+	}
+	return 0, errors.New("unsupported practice audio: choose PCM WAV, MP3, FLAC, M4A (AAC/Apple Lossless) or Opus")
 }
 func (d Decoder) Inspect(ctx context.Context, r resource.Reader) (audio.Info, error) {
 	if err := ctx.Err(); err != nil {
@@ -80,9 +86,18 @@ func (d Decoder) OpenVerifiedPCM(ctx context.Context, r resource.Reader, info au
 	if info.Encoding == "wav-pcm" {
 		return (audio.WAVDecoder{}).OpenVerifiedPCM(ctx, r, info)
 	}
-	codec := 1
-	if info.Encoding == "flac" {
+	var codec int
+	switch info.Encoding {
+	case "mp3":
+		codec = 1
+	case "flac":
 		codec = 2
+	case "aac", "alac":
+		codec = 3
+	case "opus":
+		codec = 4
+	default:
+		return nil, errors.New("unsupported source codec")
 	}
 	stream, err := openCompressed(ctx, r, codec)
 	if err != nil {

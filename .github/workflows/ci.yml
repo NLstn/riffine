@@ -52,6 +52,8 @@ jobs:
         working-directory: web
       - run: npm run build
         working-directory: web
+      - name: Check M4A and Opus import, seeking and saved projects
+        run: node scripts/check-browser-codecs.mjs --media-only
       - run: node scripts/check-browser-output.mjs
       - run: node scripts/check-browser-presentation.mjs
       - run: node scripts/check-browser-boundary.mjs

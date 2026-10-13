@@ -33,11 +33,14 @@ a document. Handles must not substitute for content identity across hosts.
 SHA-256 covers original bytes including metadata; re-encoding or retagging changes
 identity. Decoder cursors (`DataOffset`/`DataBytes`) are never saved session metadata.
 Project v4 separates the source codec (`encoding`) and optional original sample
-precision (`bits`) from generic source dimensions/identity. MP3 has no fixed PCM
-precision; WAV requires 16/24/32 bits and FLAC can report original precision.
+precision (`bits`) from generic source dimensions/identity. MP3, AAC and Opus have
+no fixed PCM precision; WAV requires 16/24/32 bits, and FLAC/ALAC may report
+original precision.
 Versions 1–3 migrate explicitly as PCM WAV, preserving all coordinates/settings.
-Native tested adapters support WAV/FLAC/MP3; pure-Go/browser harnesses advertise
-WAV PCM only. See [codec validation](validation/native-codecs.md).
+Native tested adapters support WAV/FLAC/MP3; the pure-Go decoder advertises WAV
+PCM only. Browser workers additionally support M4A (AAC/ALAC) and Ogg Opus.
+See [native codec validation](validation/native-codecs.md) and
+[browser codec validation](validation/browser-codecs.md).
 
 `Store.Read` rejects documents over its requested limit before materializing them.
 The core independently rejects project JSON over 1 MiB. `Store.Create` must publish

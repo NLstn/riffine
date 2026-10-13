@@ -11,7 +11,7 @@ loops, extracts waveform peaks, renders practice audio through Signalsmith
 Stretch, and plays it through miniaudio.
 
 The browser client indexes local music and provides a practice workspace for
-PCM WAV, MP3 and FLAC with independent speed/pitch, live A/B looping, waveform
+PCM WAV, MP3, FLAC, M4A (AAC/Apple Lossless) and Ogg Opus with independent speed/pitch, live A/B looping, waveform
 navigation, named phrases and saved projects. The current CLI playback renders the selection to a temporary
 WAV first; parameters are not changed interactively during playback. The native
 processing layer now also has an experimental [bounded streaming DSP API](native/include/riffine_stream.h)
@@ -99,9 +99,11 @@ All write commands refuse to replace existing files. Save edits under a new name
 
 ## Current limits
 
-- Practice import: RIFF/WAVE integer PCM 16/24/32-bit, MP3 and FLAC,
-  mono/stereo, 8–192 kHz. Float/extensible WAV, RF64, M4A/AAC, OGG/Opus
-  and other library-indexed formats do not yet support practice.
+- Browser practice import: RIFF/WAVE integer PCM 16/24/32-bit, MP3, FLAC,
+  M4A containing AAC or Apple Lossless, and Ogg Opus (`.opus`, `.ogg`, `.oga`),
+  mono/stereo, 8–192 kHz. Native CLI/helper support remains WAV/MP3/FLAC.
+  Protected M4A, Vorbis, float/extensible WAV, RF64 and other library-indexed
+  formats do not yet support practice.
 - Render: PCM16 WAV; independent speed 0.25–2x and pitch ±12 semitones. The chosen
   DSP can introduce artifacts, especially at extreme slowdown and on transients.
 - Native offline rendering uses the bounded, latency-trimmed selection kernel
@@ -171,13 +173,18 @@ npm --prefix web run dev
 ```
 
 Open the localhost URL and choose **Choose music folder → Practice** beside a
-PCM WAV, MP3 or FLAC track. Set **Speed (%)** and **Pitch (semitones)**, then
+PCM WAV, MP3, FLAC, M4A or Opus track. Set **Speed (%)** and **Pitch (semitones)**, then
 **Apply speed / pitch**. Enter selection start/end in source seconds and choose
 **Apply A/B loop → Play**. Click the waveform to set the start and Shift-click
 for the end. Pause, Stop, Restart and Seek use the same live transport; position
 and completed loops follow the shared core's device acknowledgements.
 
 For a quick check, use **Open practice workspace → Try generated MP3 demo**.
+
+`npm run dev` and `npm run build` also package the pinned M4A/Opus WASM
+decoder and its corresponding sources locally. It runs in a cancellable worker;
+audio stays on this device. `node scripts/check-browser-codecs.mjs --media-only`
+checks the new formats without requiring the native helper or DSP build.
 Download/reopen projects with the same original source to keep parameters,
 named phrases, markers, notes and speed ladders. Audio stays on the device;
 no upload, external server or manual conversion is required.
@@ -186,7 +193,7 @@ Space toggles Play/Pause, R restarts and S stops while focus is in the workspace
 **Keyboard shortcuts** lets you remap or disable them and save preferences
 locally; typing and native button activation retain their usual keys.
 
-[MP3/FLAC support and validation](docs/validation/browser-codecs.md),
+[Browser format support and validation](docs/validation/browser-codecs.md),
 [live binding](docs/validation/browser-live-binding.md),
 [keyboard controls](docs/validation/browser-keyboard-controls.md) and
 [selection preview](docs/validation/browser-audio-preview.md).

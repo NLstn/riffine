@@ -1,7 +1,7 @@
-# Browser MP3 and FLAC practice
+# Browser audio format support
 
 The music library's **Practice** action and **Choose audio / relink** accept
-PCM WAV, MP3 and FLAC. Speed/pitch, A/B looping, seek, waveform detail, named
+PCM WAV, MP3, FLAC, M4A (AAC/Apple Lossless) and Ogg Opus. Speed/pitch, A/B looping, seek, waveform detail, named
 phrases, saved projects and speed ladders use the existing shared Go session
 and C++ processing path. Source coordinates and project hashes refer to the
 original file; no converted WAV is created or substituted.
@@ -9,8 +9,7 @@ original file; no converted WAV is created or substituted.
 ## Try it
 
 Build the browser core and DSP using the README instructions, then open the
-localhost app. Choose a music folder and click **Practice** beside an MP3 or
-FLAC. Set **Speed (%)** and **Pitch (semitones)** and apply them. Set selection
+localhost app. Choose a music folder and click **Practice** beside a supported track. Set **Speed (%)** and **Pitch (semitones)** and apply them. Set selection
 start/end in source seconds, apply the A/B loop and press **Play**. Download a
 project to retain edits; reopen it with the same original audio. The generated
 MP3 demo also exercises the real browser File import path without selecting
@@ -36,15 +35,51 @@ Unsupported/corrupt files return an error; previously opened projects survive
 failed or cancelled replacement opens. WAV editing remains available when
 optional processing assets are missing.
 
-Supported decoded dimensions are mono/stereo, 8–192 kHz. M4A/AAC, OGG/Opus,
-WMA and other library-indexed formats do not yet support practice. Format
-support uses the pinned decoder rather than browser-dependent decodeAudioData
-or HTML audio playback-rate substitutions.
+Supported decoded dimensions are mono/stereo, 8–192 kHz. M4A must contain AAC
+or Apple Lossless; Opus must use the Ogg container (`.opus`, `.ogg`, `.oga`).
+Protected media, Ogg Vorbis, WMA and other library-indexed formats remain
+unsupported. The native CLI/helper still supports WAV/MP3/FLAC. Browser format
+support uses pinned WASM decoders and does not depend on browser codec availability.
+
+### M4A and Opus worker
+
+A pinned libav.js 4.10.6 fat variant (FFmpeg 6.1.1, libopus 1.4) handles the new
+containers/codecs. `npm run dev`/`build` packages the decoder plus its complete
+license inventory and corresponding sources. The decoder loads locally only
+when opening M4A or Opus; no audio or decoder code is fetched from a CDN.
+
+The block-reader device borrows the same original File and serves slices of at
+most 64 KiB. It reads one compressed packet at a time, decodes at most 8192 frames
+per block, and caps its WASM heap at 64 MiB. MP4 indexing also consumes that heap;
+files exceeding its capacity fail. An initial bounded-memory decode counts actual
+frames without retaining whole-song PCM. AAC delay metadata and the MP4 end
+exclude encoder padding; libopus applies pre-skip and the final granule. The
+original bytes remain the project fingerprint, and saved v4 projects identify
+the codec as `aac`, `alac` or `opus`. ALAC precision is left unspecified by this
+adapter; it does not infer source precision from its decoded sample storage.
+
+Backward seeks reopen the demuxer/decoder and replay from zero; forward seeks
+continue sequentially. Both preserve the exact decoded sample sequence, including
+loop endpoints. Seeking far into a long file can take longer. Cancelling any
+operation terminates the owning worker and fences its callbacks.
 
 ## Evidence
 
+- `node scripts/check-browser-codecs.mjs --media-only` runs in required web CI:
+  M4A/AAC, M4A/ALAC and Opus decode to 48,000 frames; reference differences are
+  below 0.00004. ALAC reference samples match exactly. This mode needs npm assets
+  and the Go browser build, without requiring Emscripten or a native helper.
+- New formats also run through the actual live binding with
+  `RIFFINE_LIVE_SOURCE=native/testdata/generated-stereo.m4a` or `.opus`; Opus
+  additionally exercises saved speed ladders with `RIFFINE_LIVE_PLAN=1`.
+- The module packaging regression simulates a browser module worker's
+  `importScripts` surface and checks that loading libav preserves the codec
+  worker's message handler. Actual in-app browser M4A and Opus import, waveform
+  and live A/B looping pass; M4A also runs at 75% speed / -2 semitones.
+
+
 - `node scripts/check-browser-codecs.mjs build/native/riffine-audio`: generated
-  stereo MP3/FLAC, native versus WASM dimensions/PCM, exact random seeks/EOF,
+  stereo MP3/FLAC/M4A/ALAC/Opus, native or independent FFmpeg reference PCM, exact random seeks/EOF,
   full overview and three-frame detail, original SHA-256, saved speed/pitch/loop
   reopening, malformed input and cancelled-open lifetime fences. FLAC PCM is
   identical; the native/WASM MP3 difference is at most 1/32768 in this fixture
@@ -64,7 +99,7 @@ or HTML audio playback-rate substitutions.
   Practice action passes the same selected File to the verified import path.
 
 CI builds the actual browser assets and native decoder, requires compressed
-conformance plus MP3/FLAC live binding, and saves their JSON evidence. These
+conformance plus MP3/FLAC/M4A/Opus live binding, and saves their JSON evidence. These
 checks establish wiring and generated-signal behavior, not subjective listening
 quality for every music recording or platform.
 

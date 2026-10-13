@@ -12,7 +12,7 @@ import (
 )
 
 // ValidateInfo checks canonical original identity and generic decoded dimensions.
-// Source precision is optional for FLAC and absent for lossy MP3; it never means
+// Source precision is optional for FLAC/ALAC and absent for lossy codecs; it never means
 // the worker's float32 output storage. Metadata cannot advertise an untested codec.
 func ValidateInfo(i Info) error {
 	hash, err := hex.DecodeString(i.SHA256)
@@ -24,13 +24,13 @@ func ValidateInfo(i Info) error {
 		if i.Bits != 16 && i.Bits != 24 && i.Bits != 32 {
 			return errors.New("unsupported WAV precision")
 		}
-	case "flac":
+	case "flac", "alac":
 		if i.Bits != 0 && (i.Bits < 4 || i.Bits > 32) {
-			return errors.New("invalid FLAC source precision")
+			return errors.New("invalid lossless source precision")
 		}
-	case "mp3":
+	case "mp3", "aac", "opus":
 		if i.Bits != 0 {
-			return errors.New("MP3 has no fixed source PCM precision")
+			return errors.New("lossy audio has no fixed source PCM precision")
 		}
 	default:
 		return errors.New("unsupported source codec")

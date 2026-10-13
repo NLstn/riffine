@@ -9,6 +9,7 @@ No third-party source or commercial recordings are committed in this repository.
 | [Signalsmith Linear](https://github.com/Signalsmith-Audio/linear) | `de55e6a50ffcf6f8f43f649692d94691c7025151` (0.6.4) | MIT | DSP/FFT dependency |
 | [Emscripten](https://github.com/emscripten-core/emscripten) | `4.0.14` (SDK `eff90ca04a3785f571a8095b3a42b63799cf384a`) | MIT alternative selected; musl MIT and LLVM runtime license with exceptions | Browser C++ processing module/runtime |
 | [miniaudio](https://github.com/mackron/miniaudio) | `f40cf03f80cdb7e741d43e53b7e706e8c1394bcf` (0.11.23) | MIT-0 alternative selected | WAV/FLAC/MP3 codecs and native device output |
+| [libav.js](https://github.com/Yahweasel/libav.js/releases/tag/v4.10.6.1.1) | npm `4.10.6`, build `4.10.6.1.1`, fat variant | LGPL-2.1-or-later for FFmpeg 6.1.1; ISC wrapper; dependencies retain their embedded notices | Browser M4A/AAC/ALAC and Ogg Opus decoding |
 
 CMake downloads these revisions and installs their complete license texts into
 `licenses/`. Distribute that directory with native binaries, together with this
@@ -20,6 +21,16 @@ The browser DSP build copies complete Signalsmith, Emscripten, musl, libc++, lib
 notices into `web/public/practice/licenses/`, together with Riffine's license and
 this inventory. Keep those files with the generated browser module and WASM.
 The Emscripten notice includes its bundled runtime's additional components.
+
+The media decoder is an independent, replaceable WASM module. The npm build
+copies its complete embedded license inventory to `practice/media/LICENSES.txt`
+and the upstream corresponding sources, dependency archives and build recipes
+to `practice/media/sources/`. `SOURCES.txt` identifies the exact build and our
+module adaptation script. Keep that entire directory with production web assets;
+source archives are available alongside the decoder and are not loaded during
+playback. No GPL-only FFmpeg configuration is used. The `fat` variant includes
+additional unused audio codecs; their notices and corresponding sources are
+included too. Riffine's own code remains MIT licensed.
 
 Future Wails, FFT acceleration, codecs or DSP alternatives require their own
 review. Do not silently add GPL/commercial DSP dependencies to an MIT-only build.
