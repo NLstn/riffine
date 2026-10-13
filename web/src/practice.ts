@@ -45,15 +45,20 @@ interface OutputQueueFactory {
  PresentationMonitor?: new (context: AudioContext, timeline: SharedArrayBuffer, onError: (error: Error) => void) => PresentationMonitorPort;
 }
 export class BrowserPractice implements PracticeFacade {
- private worker = new Worker('/practice/worker.js');
+ private static nextClient = 0;
+ private readonly clientId = ++BrowserPractice.nextClient;
+ private readonly startedAt = performance.now();
+ private worker: Worker;
  private next = 0;
  private serial: Promise<unknown> = Promise.resolve();
  private liveHost?: LiveHostPort;
  private liveSetup?: Promise<void>;
  liveSupported = globalThis.crossOriginIsolated && typeof AudioContext === 'function' && typeof AudioContext.prototype.getOutputTimestamp === 'function';
- private pending = new Map<number, { resolve: (result: PracticeResponse) => void; reject: (error: Error) => void }>();
+ private pending = new Map<number, { type: string; startedAt: number; resolve: (result: PracticeResponse) => void; reject: (error: Error) => void }>();
  private ready: Promise<void>;
  private disposed = false;
+ private shutdownError?: Error;
+ private shutdownKind?: 'dispose' | 'failure';
  private audio?: AudioContext;
  private outputBoundary?: OutputBoundaryPort;
  private previewAbort?: (error?: Error) => void;
@@ -63,7 +68,19 @@ export class BrowserPractice implements PracticeFacade {
  private readyCancel?: (error: Error) => void;
  private readyTimeout?: ReturnType<typeof setTimeout>;
  private previewSupported = globalThis.crossOriginIsolated && typeof AudioContext === 'function' && 'audioWorklet' in AudioContext.prototype;
+ private log(event: string, details: Record<string, unknown> = {}, error?: unknown) {
+  const prefix = `[riffine:practice:${this.clientId}] ${event}`;
+  const context = { elapsedMilliseconds: Math.round(performance.now() - this.startedAt), ...details };
+  if (error !== undefined) console.error(prefix, context, error);
+  else console.info(prefix, context);
+ }
+ private ensureOpen() {
+  if (this.disposed) throw this.shutdownError ?? new Error('Practice workspace closed.');
+ }
  constructor(options: { loadOutput?: () => Promise<OutputQueueFactory>; loadLive?: BrowserPractice['loadLive'] } = {}) {
+  try { this.worker = new Worker('/practice/worker.js', { name: `client-${this.clientId}` }); }
+  catch (error) { this.log('worker creation failed', {}, error); throw error; }
+  this.log('worker starting', { workerURL: '/practice/worker.js', crossOriginIsolated: globalThis.crossOriginIsolated, previewSupported: this.previewSupported, liveSupported: this.liveSupported });
   this.loadLive = options.loadLive ?? (() => import(/* @vite-ignore */ new URL('/practice/live-output-host.mjs', location.origin).href));
   this.loadOutput = options.loadOutput ?? (async () => {
    const url = new URL('/practice/output-queue.mjs', location.origin).href;
@@ -77,15 +94,34 @@ export class BrowserPractice implements PracticeFacade {
   });
   this.ready = new Promise((resolve, reject) => {
    this.readyCancel = reject;
-   const timeout = this.readyTimeout = setTimeout(() => { reject(new Error('Practice core did not load.')); this.dispose(); }, 30000);
+   const timeout = this.readyTimeout = setTimeout(() => {
+    const error = new Error('Practice core did not load within 30 seconds.');
+    this.shutdown(error);
+   }, 30000);
    this.worker.onmessage = (event: MessageEvent) => {
+    if (this.disposed) return;
     const data = event.data;
     if (data.type === 'live_call') void this.handleLiveCall(data);
-    if (data.type === 'ready') { clearTimeout(timeout); this.readyCancel = undefined; resolve(); }
-    if (data.type === 'fatal') { clearTimeout(timeout); const error = new Error(data.message); reject(error); this.shutdown(error); }
-    if (data.type === 'result') { const call = this.pending.get(data.id); this.pending.delete(data.id); call?.resolve(data.response); }
+    if (data.type === 'ready') { clearTimeout(timeout); this.readyTimeout = undefined; this.readyCancel = undefined; this.log('worker ready'); resolve(); }
+    if (data.type === 'fatal') { const error = new Error(data.message); this.shutdown(error); }
+    if (data.type === 'result') {
+     const call = this.pending.get(data.id); this.pending.delete(data.id);
+     if (call) {
+      const details = { requestId: data.id, type: call.type, durationMilliseconds: Math.round(performance.now() - call.startedAt) };
+      const failure = data.response?.error;
+      if (failure) this.log('request rejected', details, new Error(`${failure.code}: ${failure.message}`));
+      else if (!['snapshot', 'events', 'poll_transport'].includes(call.type)) this.log('request completed', details);
+     }
+     call?.resolve(data.response);
+    }
    };
-   this.worker.onerror = () => { clearTimeout(timeout); const error = new Error('Practice worker failed.'); reject(error); this.shutdown(error); };
+   this.worker.onerror = (event) => {
+    if (this.disposed) return;
+    const error = new Error(event?.message ? `Practice worker failed: ${event.message}` : 'Practice worker failed.');
+    this.log('worker error', { filename: event?.filename, line: event?.lineno, column: event?.colno }, event?.error ?? error);
+    this.shutdown(error);
+   };
+   this.worker.onmessageerror = () => this.shutdown(new Error('Practice worker response could not be read.'));
   });
   // Readiness errors are surfaced by the first user request, avoiding an
   // unhandled rejection when the user keeps browsing the library.
@@ -93,13 +129,22 @@ export class BrowserPractice implements PracticeFacade {
  }
  private fail(error: Error) { for (const call of this.pending.values()) call.reject(error); this.pending.clear(); }
  private request(request: Record<string, unknown>, file?: File, document = '', queue?: SharedArrayBuffer): Promise<PracticeResponse> {
+  const type = String(request.type), startedAt = performance.now();
+  const trace = !['snapshot', 'events', 'poll_transport'].includes(type);
+  if (trace) this.log('request queued', { type, file: file ? { extension: file.name.split('.').pop()?.toLowerCase(), bytes: file.size, mediaType: file.type } : undefined });
   const invoke = async (): Promise<PracticeResponse> => {
    await this.ready;
-   if (this.disposed) throw new Error('Practice workspace has closed.');
+   this.ensureOpen();
    const id = ++this.next;
-   return new Promise((resolve, reject) => { this.pending.set(id, { resolve, reject }); try { this.worker.postMessage({ id, request: { version: 1, ...request }, file, document, queue, previewSupported: this.previewSupported, liveSupported: this.liveSupported }); } catch (error) { this.pending.delete(id); reject(error instanceof Error ? error : new Error(String(error))); } });
+   if (trace) this.log('request started', { requestId: id, type });
+   return new Promise((resolve, reject) => { this.pending.set(id, { type, startedAt, resolve, reject }); try { this.worker.postMessage({ id, request: { version: 1, ...request }, file, document, queue, previewSupported: this.previewSupported, liveSupported: this.liveSupported }); } catch (error) { this.pending.delete(id); reject(error instanceof Error ? error : new Error(String(error))); } });
   };
-  const result = this.serial.then(invoke); this.serial = result.catch(() => {}); return result;
+  const result = this.serial.then(invoke);
+  this.serial = result.catch(error => {
+   if (this.shutdownKind === 'dispose') this.log('request interrupted by workspace cleanup', { type });
+   else this.log('request failed', { type, durationMilliseconds: Math.round(performance.now() - startedAt) }, error);
+  });
+  return result;
  }
  async open(source: File, project?: File) {
   if (project && project.size > 1048576) throw new Error('Project exceeds 1 MiB.');
@@ -147,7 +192,7 @@ export class BrowserPractice implements PracticeFacade {
     const module = await Promise.race([this.loadLive(),cancelled]);
     await Promise.race([context.audioWorklet.addModule('/practice/output-worklet.mjs'),cancelled]);
     await Promise.race([Promise.all([resumed,beforeInstall]),cancelled]);
-    if (this.disposed) throw new Error('Practice workspace closed.');
+    this.ensureOpen();
     this.audio = context;
     this.liveHost = new module.LiveOutputHost(context,snapshot.project.track.audio.channels,error => console.warn('[riffine] Live output stopped:',error.message));
    } catch (error) { await this.closeAudio(context); if (this.audio === context) this.audio = undefined; if (this.liveHost?.context === context) this.liveHost = undefined; throw error; }
@@ -156,7 +201,7 @@ export class BrowserPractice implements PracticeFacade {
   return {ready, abort, context};
  }
  async transport(snapshot: Snapshot, command: LiveCommand): Promise<PracticeResponse> {
-  if (this.disposed) throw new Error('Practice workspace closed.');
+  this.ensureOpen();
   let current = snapshot, prepared: ReturnType<BrowserPractice['prepareLive']> | undefined;
   try {
    if (command.type === 'recover') {
@@ -183,7 +228,7 @@ export class BrowserPractice implements PracticeFacade {
  pollTransport() { return this.request({type:'poll_transport'}); }
  detachTransport() { return this.request({type:'detach_transport'}); }
  async preview(snapshot: Snapshot, controlsReady?: () => void) {
-  if (this.disposed) throw new Error('Practice workspace has closed.');
+  this.ensureOpen();
   if (!this.previewSupported || !snapshot.capabilities.streamPreview) throw new Error('Audio preview is unavailable in this browser.');
   if (this.audio) throw new Error('An audio preview is already running.');
   const info = snapshot.project.track.audio;
@@ -210,7 +255,7 @@ export class BrowserPractice implements PracticeFacade {
    node.onprocessorerror = () => this.cancel();
    node.connect(context.destination);
    await Promise.race([resumed, cancelled]);
-   if (this.disposed) throw new Error('Practice workspace has closed.');
+   this.ensureOpen();
    if (timeline && queueModule.PresentationMonitor) presentation = new queueModule.PresentationMonitor(context, timeline, error => { abortPreview(error); this.cancel(); });
    if (presentation && queueModule.OutputBoundary) { boundary = new queueModule.OutputBoundary(context, queue, presentation); this.outputBoundary = boundary; controlsReady?.(); }
    const result = await this.request({ type: 'preview' }, undefined, '', queue);
@@ -242,8 +287,10 @@ export class BrowserPractice implements PracticeFacade {
   return closing;
  }
  cancel() { this.outputBoundary?.close(); this.previewAbort?.(); if (!this.disposed) this.worker.postMessage({ type: 'cancel', previewSupported: this.previewSupported, liveSupported: this.liveSupported }); if (this.liveHost) void this.liveHost.fail(new Error('cancelled: live command cancelled')).catch(() => {}); else if (this.audio) void this.audio.suspend().catch(() => {}); }
- private shutdown(error: Error) {
+ private shutdown(error: Error, kind: 'dispose' | 'failure' = 'failure') {
   if (this.disposed) return;
+  this.shutdownError = error; this.shutdownKind = kind;
+  this.log(kind === 'dispose' ? 'workspace disposed' : 'worker shutdown', { pendingRequests: [...this.pending.values()].map(call => call.type), reason: error.message, cleanupStack: kind === 'dispose' ? error.stack : undefined }, kind === 'failure' ? error : undefined);
   this.disposed = true;
   clearTimeout(this.readyTimeout);
   this.readyCancel?.(error); this.readyCancel = undefined;
@@ -253,5 +300,5 @@ export class BrowserPractice implements PracticeFacade {
   void this.liveHost?.close().catch(() => {});
   if (this.audio && this.audio !== this.liveHost?.context) void this.closeAudio(this.audio).catch(() => {});
  }
- dispose() { this.shutdown(new Error('Practice workspace closed.')); }
+ dispose() { this.shutdown(new Error('Practice workspace closed.'), 'dispose'); }
 }

@@ -63,8 +63,36 @@ continue sequentially. Both preserve the exact decoded sample sequence, includin
 loop endpoints. Seeking far into a long file can take longer. Cancelling any
 operation terminates the owning worker and fences its callbacks.
 
+## Startup and import diagnostics
+
+Browser console messages prefixed with `[riffine:practice` identify each workspace
+client and worker. They include startup stages, import/waveform request timings,
+file extension/size, and shutdown reasons with error stacks. Routine transport
+polling is quiet. Audio contents, full source filenames and saved documents are
+not included in these diagnostics.
+
+Startup failures retain their original cause for pending and later requests;
+a timeout reports that the core did not load within 30 seconds. Intentional
+workspace cleanup is logged separately. React Strict Mode may create and dispose
+an initial client before starting its replacement; that expected cleanup does
+not fail the replacement's library import.
+
+To investigate a failure, open the browser console before clicking **Practice**,
+enable **Preserve log**, and filter for `riffine:practice`. Expand the error and
+its context to see the failing request or startup stage.
+
 ## Evidence
 
+- `node --experimental-strip-types scripts/check-practice-facade.mjs` verifies
+  original fatal/timeout causes survive subsequent requests, error diagnostics
+  retain stacks, and successful transport polling does not flood the console.
+- `node scripts/check-practice-workspace.mjs` mounts the actual workspace with
+  React DOM Strict Mode and checks library auto-import ownership, late disposed
+  success/rejection, operation locking, genuine errors and cleanup.
+- Local checks decode 31 existing full-length M4A/Opus tracks; actual in-app
+  browser library-row imports and complete waveforms pass for a 192-second AAC
+  track and a 326-second Opus track. Personal audio is not part of the fixtures
+  or CI, and this does not establish every browser's native folder-picker path.
 - `node scripts/check-browser-codecs.mjs --media-only` runs in required web CI:
   M4A/AAC, M4A/ALAC and Opus decode to 48,000 frames; reference differences are
   below 0.00004. ALAC reference samples match exactly. This mode needs npm assets
@@ -94,9 +122,7 @@ operation terminates the owning worker and fences its callbacks.
   WAV binding and 100-case selection/rate conformance remain passing.
 - Actual in-app browser: real generated MP3 File, waveform, 75% speed,
   -2 semitones, 0.2–0.8 second A/B loop, Play and Pause; the device-backed
-  transport reported 34 completed loops. Automated folder-picker access was
-  unavailable in this browser; folder indexing is unchanged and the row
-  Practice action passes the same selected File to the verified import path.
+  transport reported 34 completed loops.
 
 CI builds the actual browser assets and native decoder, requires compressed
 conformance plus MP3/FLAC/M4A/Opus live binding, and saves their JSON evidence. These

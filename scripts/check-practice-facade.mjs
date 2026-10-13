@@ -2,6 +2,9 @@
 // cancellation and ownership only, not DSP or browser audio presentation.
 import assert from 'node:assert/strict';
 import { setImmediate as tick } from 'node:timers/promises';
+const diagnostics=[];
+console.info=(...args)=>diagnostics.push({level:'info',args});
+console.error=(...args)=>diagnostics.push({level:'error',args});
 class MockWorker {
  static instances = [];
  constructor() { this.sent = []; this.terminations = 0; MockWorker.instances.push(this); }
@@ -201,3 +204,56 @@ assert.equal(presentationSnapshot(previousSession,reopenedSession,true),reopened
 assert.equal(presentationSnapshot(previousSession,reopenedSession,false),previousSession);
 assert.equal(presentationSnapshot(previousSession,{...previousSession,sequence:10}).sequence,10);
 console.log(JSON.stringify({reopeningAcceptsNewSessionSequence:true,staleInSessionSnapshotIgnored:true}));
+
+// A failure after readiness must remain the cause of later user requests.
+client = new BrowserPractice();
+worker = MockWorker.instances.at(-1); worker.emit({type:'ready'});
+worker.emit({type:'fatal',message:'Decoder source read failed.'});
+await assert.rejects(client.open(file),/Decoder source read failed/);
+await assert.rejects(client.transport(liveSnapshot,{type:'play'}),/Decoder source read failed/);
+assert.equal(worker.terminations,1);
+const fatalLog=diagnostics.find(entry=>entry.level==='error'&&entry.args[0].endsWith('worker shutdown')&&entry.args[2]?.message==='Decoder source read failed.');
+assert(fatalLog?.args[2] instanceof Error);assert(fatalLog.args[2].stack);
+client.dispose();assert.equal(worker.terminations,1);
+
+// Browser script failures identify the worker source and reject the active import.
+client = new BrowserPractice();
+worker = MockWorker.instances.at(-1);worker.emit({type:'ready'});
+const crashedImport=client.open(file);await tick();
+worker.onerror({message:'Source read failed',filename:'/practice/codec-worker.mjs',lineno:27,colno:4,error:new Error('Source read failed')});
+await assert.rejects(crashedImport,/Practice worker failed: Source read failed/);
+await assert.rejects(client.open(file),/Practice worker failed: Source read failed/);
+assert(diagnostics.some(entry=>entry.level==='error'&&entry.args[0].endsWith('worker error')&&entry.args[1].line===27&&entry.args[1].filename==='/practice/codec-worker.mjs'));
+assert.equal(worker.terminations,1);client.dispose();
+client = new BrowserPractice();worker=MockWorker.instances.at(-1);
+const unreadableImport=client.open(file);worker.onmessageerror();
+await assert.rejects(unreadableImport,/Practice worker response could not be read/);
+assert.equal(worker.terminations,1);client.dispose();
+
+// Simulate a cold startup timeout without delaying the suite or retrying it.
+const originalTimeout=globalThis.setTimeout;
+let timeoutCallback;
+try {
+ globalThis.setTimeout=(callback,milliseconds)=>{assert.equal(milliseconds,30000);timeoutCallback=callback;return undefined;};
+ client = new BrowserPractice();
+} finally {globalThis.setTimeout=originalTimeout;}
+worker = MockWorker.instances.at(-1); timeoutCallback();
+await assert.rejects(client.open(file),/Practice core did not load within 30 seconds/);
+await assert.rejects(client.transport(liveSnapshot,{type:'play'}),/Practice core did not load within 30 seconds/);
+assert.equal(worker.terminations,1);client.dispose();
+assert(diagnostics.some(entry=>entry.args[0].endsWith('worker ready')));
+assert(diagnostics.some(entry=>entry.args[0].endsWith('request started')&&entry.args[1].type==='import'));
+client = new BrowserPractice();
+worker = MockWorker.instances.at(-1);worker.emit({type:'ready'});
+const beforePoll=diagnostics.length;
+const polling=client.pollTransport();await tick();
+const pollRequest=worker.sent.at(-1);
+assert.equal(pollRequest.request.type,'poll_transport');
+coreReply(pollRequest,liveSnapshot);await polling;
+assert.equal(diagnostics.length,beforePoll,'routine transport polling flooded diagnostics');
+const failedPoll=client.pollTransport();await tick();
+worker.emit({type:'result',id:worker.sent.at(-1).id,response:{version:1,error:{code:'host_failure',message:'Presentation clock failed.'}}});
+await failedPoll;
+assert(diagnostics.at(-1).args[2].message.includes('Presentation clock failed.'),'failed polling did not log its error');
+client.dispose();
+console.log(JSON.stringify({fatalCausePreservedAfterReady:true,startupTimeoutCausePreserved:true,workerDiagnosticsIncludeStack:true,requestDiagnostics:true,transportPollingIsQuiet:true}));
