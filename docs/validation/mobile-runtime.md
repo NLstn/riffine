@@ -33,7 +33,7 @@ down only a simulator it booted. SDK/runtime inventory and operations are bounde
 missing runtimes fail explicitly rather than being recorded as passed build tests.
 The CI `ios-runtime` job runs this same path. The checker waits for boot completion
 for both newly started and already booted simulators, then probes process spawning
-with the runtime's `launchctl version` before running the fixture. Only simulator
+with a tiny simulator-targeted C executable before running the fixture. Only simulator
 inventory and this harmless startup probe are retried; the actual twenty-call
 conformance run retains its 60-second deadline and is never retried. Command
 outputs, elapsed times and timeout diagnostics are retained in `simulator.log`,
