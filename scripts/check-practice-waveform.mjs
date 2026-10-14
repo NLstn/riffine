@@ -40,5 +40,19 @@ try {
  assert.equal(calls.length,0,'B dragging accidentally edited A through its synthetic click');
  await React.act(async()=>root.render(React.createElement(Waveform,{...props,disabled:true})));
  await key(handles[0],'ArrowRight');assert.equal(calls.length,0);assert.equal(handles[0].getAttribute('tabindex'),'-1');
- console.log(JSON.stringify({keyboardSourceFramePrecision:true,shiftTenFrames:true,visibleRangeHomeEnd:true,clickCoordinatesClamped:true,dragBDoesNotChangeA:true,busyDisablesHandles:true}));
+ // Drag-to-select works in both directions and does not trigger a stray A
+ // click after releasing the captured pointer.
+ const ranges=[];
+ await React.act(async()=>root.render(React.createElement(Waveform,{...props,onRange:(a,b)=>ranges.push([Math.round(a*48000),Math.round(b*48000)]),position:.7,markers:[{id:'verse',kind:'section',label:'Verse',position:.8}]})));
+ assert.equal(document.querySelectorAll('.waveform-playhead').length,1);
+ assert.equal(document.querySelector('.waveform-marker text').textContent,'Verse');
+ for(const [from,to] of [[200,450],[450,200]]) {
+  await React.act(async()=>svg.dispatchEvent(new dom.window.MouseEvent('pointerdown',{button:0,clientX:from,bubbles:true,cancelable:true})));
+  await React.act(async()=>svg.dispatchEvent(new dom.window.MouseEvent('pointermove',{clientX:to,bubbles:true})));
+  await React.act(async()=>svg.dispatchEvent(new dom.window.MouseEvent('pointerup',{clientX:to,bubbles:true})));
+  assert.deepEqual(ranges.at(-1),[28800,40800]);
+  await React.act(async()=>svg.dispatchEvent(new dom.window.MouseEvent('click',{clientX:to,bubbles:true})));
+  assert.equal(calls.length,0);
+ }
+ console.log(JSON.stringify({keyboardSourceFramePrecision:true,shiftTenFrames:true,visibleRangeHomeEnd:true,clickCoordinatesClamped:true,dragBDoesNotChangeA:true,busyDisablesHandles:true,dragToSelectBothDirections:true,playheadAndMarkersVisible:true}));
 } finally {await React.act(async()=>root.unmount());await bundle?.close();await rm(temporary,{recursive:true,force:true});}
