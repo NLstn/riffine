@@ -173,14 +173,27 @@ npm --prefix web ci
 npm --prefix web run dev
 ```
 
-Open the localhost URL and choose **Choose music folder → Practice** beside a
-PCM WAV, MP3, FLAC, M4A or Opus track. Set **Speed (%)** and **Pitch (semitones)**, then
-**Apply speed / pitch**. Enter selection start/end in source seconds and choose
-**Apply A/B loop → Play**. Click the waveform to set the start and Shift-click
-for the end. Pause, Stop, Restart and Seek use the same live transport; position
-and completed loops follow the shared core's device acknowledgements.
+Open the localhost URL to start in **Practice**. Choose **Open song** for a
+WAV, MP3, FLAC, M4A or Opus file, or open **Music library → Choose music folder**
+and click a song. It opens directly in the large waveform player.
 
-For a quick check, use **Open practice workspace → Try generated MP3 demo**.
+Press **Play** and adjust **Speed** or **Pitch** with the sliders, numeric fields,
+speed presets or pitch step buttons. Changes take effect during playback without
+an Apply button. Drag across the waveform to select an A/B loop; drag its handles
+or click for A and Shift-click for B to refine it. **Loop** toggles repetition,
+**Zoom to loop** enlarges the selected phrase, and the seek bar navigates the song.
+The playhead and repeat count follow the shared core's device acknowledgements.
+
+**Save project** adds a copy to the visible **Training projects** sidebar. Reopen
+it to update that saved copy with revision protection. Projects retain speed,
+pitch, loops, phrases, notes and training plans. The matching original is reused
+when available in the current library; otherwise choose it when prompted. Audio
+stays on your device and is verified before a saved project opens. Project options
+include previous-version recovery and portable download.
+
+Use **Try a demo song** for a generated audio fixture. Saved phrases sit below the
+player; notes, markers, training plans, timing and keyboard preferences are in
+expandable panels. The layout adapts to smaller screens.
 
 `npm run dev` and `npm run build` also package the pinned M4A/Opus WASM
 decoder and its corresponding sources locally. It runs in a cancellable worker;
