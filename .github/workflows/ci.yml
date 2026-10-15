@@ -67,6 +67,7 @@ jobs:
           node scripts/check-browser-storage.mjs
           node scripts/check-browser-saved-projects.mjs
           node scripts/check-browser-offline.mjs
+          node --experimental-strip-types scripts/check-browser-startup.mjs
       - name: Check M4A and Opus import, seeking and saved projects
         run: node scripts/check-browser-codecs.mjs --media-only
       - run: node scripts/check-browser-output.mjs
