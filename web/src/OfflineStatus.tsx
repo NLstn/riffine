@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { appPath } from './app-url';
 
 export default function OfflineStatus() {
  const [status, setStatus] = useState('');
@@ -9,7 +10,7 @@ export default function OfflineStatus() {
   const show = (message: string) => { if (active) setStatus(message); };
   if (!('serviceWorker' in navigator)) { show('Offline app storage is unavailable in this browser. Device projects can still be downloaded.'); return; }
   show('Preparing this app for offline practice…');
-  void navigator.serviceWorker.register('/offline-sw.js', {scope:'/', updateViaCache:'none'}).then(registration => {
+  void navigator.serviceWorker.register(appPath('offline-sw.js'), {scope:appPath(''), updateViaCache:'none'}).then(registration => {
    if (!active) return;
    const update = () => {
     if (registration.waiting) show('An app update is ready. Save your project, then close all Riffine tabs and reopen to use it.');
