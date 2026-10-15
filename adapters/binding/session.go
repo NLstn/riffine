@@ -43,6 +43,7 @@ type Response struct {
 type Session struct {
 	mu      sync.Mutex
 	service practice.Service
+	cache   waveform.Cache
 	session *practice.Session
 	pyramid *waveform.Pyramid
 	detail  *practice.WaveformDetail
@@ -50,6 +51,12 @@ type Session struct {
 }
 
 func New(service practice.Service) *Session { return &Session{service: service} }
+
+// NewWithWaveformCache enables host-owned persistent peak storage.
+func NewWithWaveformCache(service practice.Service, cache waveform.Cache) *Session {
+	return &Session{service: service, cache: cache}
+}
+
 func bridgeError(err error) *practice.Error {
 	var api *practice.Error
 	if errors.As(err, &api) {
@@ -196,7 +203,7 @@ func (s *Session) Handle(ctx context.Context, data []byte) Response {
 			return invalid("invalid waveform window or bin limit")
 		}
 		if s.pyramid == nil {
-			result, err := s.session.OpenWaveform(ctx, nil, nil)
+			result, err := s.session.OpenWaveform(ctx, s.cache, nil)
 			if err != nil {
 				return reject(err)
 			}

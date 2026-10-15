@@ -85,3 +85,25 @@ node scripts/serve-loading-profile.mjs
 ```
 
 Open `http://127.0.0.1:5175/profile-song-loading.html` and press **Profile import and first playback**. It runs 30 cases and saves `build/import-profile/browser-results.json`. Query parameters can select `seconds=180`, `formats=wav,m4a,opus`, or `runs=3`. For uninstrumented confirmation, restart with `RIFFINE_LOADING_PROFILE_PLAIN=1`; results save separately as `browser-plain-results.json`. Preserve earlier measurements before rerunning.
+
+## Persistent waveform cache
+
+The browser now supplies an IndexedDB peak cache to the session binding. The
+existing core key includes the original-byte SHA-256, algorithm version, sample
+rate, channels and frame count. A fresh worker or selection of the same bytes
+can reuse the pyramid without opening a waveform PCM decoder. Import still
+verifies the selected file; first-time analysis and zoomed PCM detail still
+require decoding. The measurements above predate this persistent cache; no new
+browser wall-time speedup is claimed here.
+
+Peaks occupy a separate `riffine-peaks-v1` database, capped at 32 entries of at
+most 4 MiB each. Oldest generated entries are evicted. Core checksum, identity
+and shape validation reject corrupt/incompatible entries and rebuild them.
+Missing storage, quota errors and failed cache writes leave loading usable.
+Publication uses an atomic IndexedDB transaction with cancellation fencing.
+
+Validation: `node scripts/check-browser-peak-cache.mjs` covers fresh-owner
+persistence, content/version misses, size limits, cancellation, unavailable
+storage and eviction. `TestPersistentWaveformCacheAcrossBindings` verifies that
+two fresh bindings produce identical windows with only one PCM decoder open.
+Existing core tests cover corrupt-cache rebuilds and changed-source rejection.

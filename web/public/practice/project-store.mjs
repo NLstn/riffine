@@ -150,3 +150,46 @@ export function runProjectStore(requestJSON, document, complete, failed) {
  })();
  return fence => {controller.abort(); void task.then(() => fence(''));};
 }
+
+// Disposable peaks use a separate database so eviction never touches projects.
+export const MAX_PEAK_BYTES = 4 << 20;
+export const MAX_PEAK_ENTRIES = 32;
+export class PeakCache extends ProjectStore {
+ constructor(options = {}) { super({database:'riffine-peaks-v1', ...options}); }
+ async get(key, signal) {
+  return this.transaction('readonly', (store, done) => {
+   const request = store.get(key);
+   request.onsuccess = () => {
+    const data = request.result?.data;
+    done(data instanceof Uint8Array && data.byteLength <= MAX_PEAK_BYTES ? data : null);
+   };
+  }, signal);
+ }
+ async put(key, data, signal) {
+  if (typeof key !== 'string' || key.length > 512 || !(data instanceof Uint8Array) || data.byteLength > MAX_PEAK_BYTES) throw new Error('Invalid peak cache entry');
+  return this.transaction('readwrite', (store, done) => {
+   store.put({id:key, data, savedAt:Date.now()});
+   // Bound persistent storage to 128 MiB, evicting the oldest generated peaks.
+   const entries = [];
+   const request = store.openCursor();
+   request.onsuccess = () => {
+    const cursor = request.result;
+    if (cursor) { entries.push({id:cursor.key, savedAt:cursor.value.savedAt}); cursor.continue(); return; }
+    entries.sort((a,b) => b.savedAt - a.savedAt);
+    for (const entry of entries.slice(MAX_PEAK_ENTRIES)) store.delete(entry.id);
+    done(null);
+   };
+  }, signal);
+ }
+}
+export const peakCache = new PeakCache();
+export function runPeakCache(method, key, data, complete, failed) {
+ const controller = new AbortController();
+ const task = (async () => {
+  try {
+   if (method !== 'get' && method !== 'put') throw new Error('Invalid peak cache operation');
+   complete(await (method === 'get' ? peakCache.get(key, controller.signal) : peakCache.put(key, data, controller.signal)));
+  } catch (error) { failed(String(error)); }
+ })();
+ return fence => {controller.abort(); void task.then(() => fence(''));};
+}

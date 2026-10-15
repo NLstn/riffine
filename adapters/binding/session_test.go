@@ -13,6 +13,8 @@ import (
 	"github.com/NLstn/riffine/adapters/filesystem"
 	"github.com/NLstn/riffine/core/audio"
 	"github.com/NLstn/riffine/core/practice"
+	"github.com/NLstn/riffine/core/resource"
+	"github.com/NLstn/riffine/core/waveform"
 )
 
 func TestBindingUsesCoreCommandsAndPortableReopen(t *testing.T) {
@@ -166,5 +168,51 @@ func TestBindingRevisionProtectedSaveAndRecovery(t *testing.T) {
 	}
 	if response := call(stale, Request{Version: 1, Type: "export"}); response.Error != nil || !strings.Contains(response.Document, `"speed": 0.6`) {
 		t.Fatal("conflict discarded edits", response)
+	}
+}
+
+type countingWaveDecoder struct {
+	audio.WAVDecoder
+	opens int
+}
+
+func (d *countingWaveDecoder) OpenVerifiedPCM(ctx context.Context, r resource.Reader, info audio.Info) (audio.PCMStream, error) {
+	d.opens++
+	return d.WAVDecoder.OpenVerifiedPCM(ctx, r, info)
+}
+func TestPersistentWaveformCacheAcrossBindings(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "song.wav")
+	var pcm bytes.Buffer
+	if err := audio.WriteTone(&pcm, .2, 440, 48000, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, pcm.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	decoder := &countingWaveDecoder{}
+	host := filesystem.Host{}
+	service := practice.Service{Resources: host, Store: host, Decoder: decoder}
+	cache := filesystem.PeakCache{Directory: filepath.Join(dir, "peaks")}
+	var previous *waveform.Window
+	for i := 0; i < 2; i++ {
+		bridge := NewWithWaveformCache(service, cache)
+		for _, request := range []Request{{Version: 1, Type: "import", Source: source, Document: filepath.Join(dir, "project.json")}, {Version: 1, Type: "waveform", StartFrame: 0, EndFrame: 9600, Bins: 7}} {
+			data, _ := json.Marshal(request)
+			result := bridge.Handle(context.Background(), data)
+			if result.Error != nil {
+				t.Fatal(result.Error)
+			}
+			if result.Window != nil {
+				if previous != nil && !reflect.DeepEqual(previous, result.Window) {
+					t.Fatal("cached waveform differs")
+				}
+				previous = result.Window
+			}
+		}
+		bridge.Close()
+	}
+	if decoder.opens != 1 {
+		t.Fatalf("decoded waveform %d times across fresh bindings", decoder.opens)
 	}
 }
