@@ -1,0 +1,105 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Song loading profile</title>
+<style>body{font:16px system-ui;margin:32px;max-width:1100px}button{padding:10px 16px}pre{white-space:pre-wrap}table{border-collapse:collapse}th,td{padding:8px 12px;border-bottom:1px solid #ccc;text-align:right}th:first-child,td:first-child{text-align:left}</style>
+<h1>Song loading profile</h1>
+<p>Generated local audio; actual Go/WASM, DSP, waveform analysis and Web Audio output.</p>
+<button id="run">Profile import and first playback</button>
+<p id="status">Ready.</p>
+<table><thead><tr><th>Track</th><th>Run</th><th>Worker</th><th>Import</th><th>Waveform</th><th>First play</th><th>Presented</th><th>Resume</th></tr></thead><tbody id="rows"></tbody></table>
+<pre id="result"></pre>
+<script type="module">
+import {BrowserPractice} from './src/practice.ts';
+import {readTrack} from './src/library.ts';
+const fixtureRoot='/__loading-profile/fixtures/';
+const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const status=document.querySelector('#status'),result=document.querySelector('#result');
+const records=[];
+const save=async complete=>{
+ const profile={date:'2026-10-15',browser:navigator.userAgent,complete,query:location.search,records};
+ const response=await fetch('/__loading-profile/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(profile)});
+ if(!response.ok)throw new Error('Could not save profiling measurements.');
+};
+const diff=(before,after)=>Object.fromEntries(Object.keys(after).map(key=>[key,after[key]-(before[key]||0)]));
+document.querySelector('#run').onclick=async()=>{
+ document.querySelector('#run').disabled=true;
+ let client;
+ try{
+  const params=new URLSearchParams(location.search),runs=Number(params.get('runs')||3);
+  const manifest=await(await fetch(fixtureRoot+'manifest.json')).json();
+  const fixtures=manifest.fixtures.filter(x=>(!params.has('seconds')||params.get('seconds').split(',').includes(String(x.seconds)))&&(!params.has('formats')||params.get('formats').split(',').includes(x.format)));
+  for(const fixture of fixtures){
+   status.textContent=`Reading local fixture ${fixture.name}…`;
+   // Local fixture delivery and File construction are excluded from app timing.
+   const file=new File([await(await fetch(fixtureRoot+fixture.name)).blob()],fixture.name);
+   for(let run=1;run<=runs;run++){
+    status.textContent=`${fixture.name}, run ${run}/${runs}: opening…`;
+    let host,stats={},hostTimes=[],moduleMs=0;
+    const measured=async(name,action)=>{
+     const before={...stats},start=performance.now(),value=await action();
+     if(value?.error)throw new Error(value.error.message);
+     return {ms:performance.now()-start,stats:diff(before,stats),value};
+    };
+    const tags=await measured('tags',()=>readTrack(file,file.name));
+    if(tags.value.artworkUrl)URL.revokeObjectURL(tags.value.artworkUrl);
+    const workerStart=performance.now();
+    client=new BrowserPractice({loadLive:async()=>{
+     const start=performance.now();
+     const {LiveOutputHost}=await import(/* @vite-ignore */new URL('/practice/live-output-host.mjs',location.origin).href);
+     moduleMs=performance.now()-start;
+     return {LiveOutputHost:class extends LiveOutputHost{constructor(...args){super(...args);host=this;}}};
+    }});
+    // Development harness observes private worker/readiness solely for timing;
+    // application behavior and the serialized production command path stay intact.
+    const receive=client.worker.onmessage;
+    client.worker.onmessage=event=>{
+     if(event.data.loadingProfile)stats=event.data.loadingProfile;
+     if(event.data.type==='live_call')hostTimes.push({method:event.data.method,at:performance.now()});
+     receive.call(client.worker,event);
+    };
+    await client.ready;
+    const workerMs=performance.now()-workerStart;
+    const imported=await measured('import',()=>client.open(file));
+    let snapshot=imported.value.snapshot;
+    status.textContent=`${fixture.name}, run ${run}/${runs}: building waveform…`;
+    const waveform=await measured('waveform',()=>client.waveform(0,snapshot.project.track.audio.frames));
+    const cachedWaveform=await measured('cached waveform',()=>client.waveform(0,snapshot.project.track.audio.frames));
+    const play=async()=>{
+     const start=performance.now();let copiedMs,presentedMs,stopped=false;
+     const observe=(async()=>{
+      while(!stopped){
+       try{
+        if(host?.writer&&copiedMs===undefined&&host.writer.snapshot().copiedFrames>0)copiedMs=performance.now()-start;
+        if(host?.monitor?.frames>0){presentedMs=performance.now()-start;return;}
+       }catch{}
+       if(performance.now()-start>60000)throw new Error('First output presentation timed out.');
+       await delay(4);
+      }
+     })();
+     const observed=observe.then(()=>({}),error=>({error}));
+     try{
+      const response=await measured('play',()=>client.transport(snapshot,{type:'play'}));
+      snapshot=response.value.snapshot;
+      const observation=await observed;if(observation.error)throw observation.error;
+      return {...response,copiedMs,presentedMs};
+     }finally{stopped=true;}
+    };
+    status.textContent=`${fixture.name}, run ${run}/${runs}: preparing playback…`;
+    const firstPlay=await play();
+    const pause=await measured('pause',()=>client.transport(snapshot,{type:'pause'}));snapshot=pause.value.snapshot;
+    const resume=await play();
+    const record={...fixture,run,tagsMs:tags.ms,workerMs,liveModuleMs:moduleMs,importMs:imported.ms,waveformMs:waveform.ms,cachedWaveformMs:cachedWaveform.ms,readyMs:workerMs+imported.ms+waveform.ms,firstPlayMs:firstPlay.ms,firstCopiedMs:firstPlay.copiedMs,firstPresentedMs:firstPlay.presentedMs,resumeMs:resume.ms,resumePresentedMs:resume.presentedMs,baseLatency:host.context.baseLatency,outputLatency:host.context.outputLatency,underrunFrames:host.writer.snapshot().underrunFrames,importStats:imported.stats,waveformStats:waveform.stats,cachedWaveformStats:cachedWaveform.stats,firstPlayStats:firstPlay.stats,resumeStats:resume.stats,hostCalls:hostTimes.map(x=>({method:x.method,at:x.at-workerStart}))};
+    records.push(record);
+    await save(false);
+    const row=document.createElement('tr');for(const value of [fixture.name,run,workerMs,imported.ms,waveform.ms,firstPlay.ms,firstPlay.presentedMs,resume.ms]){const cell=document.createElement('td');cell.textContent=typeof value==='number'?value.toFixed(1):value;row.append(cell);}document.querySelector('#rows').append(row);
+    result.textContent=JSON.stringify({browser:navigator.userAgent,instrumented:!!Object.keys(stats).length,records},null,2);
+    client.dispose();client=undefined;
+    await delay(100);
+   }
+  }
+  await save(true);
+  status.textContent=`Complete: ${records.length} measured imports and first-play setups.`;
+ }catch(error){status.textContent=`Failed: ${error.message}`;result.textContent=JSON.stringify({error:String(error.stack||error),records},null,2);}
+ finally{client?.dispose();document.querySelector('#run').disabled=false;}
+};
+</script>

@@ -3,10 +3,25 @@ package practice
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/NLstn/riffine/core/audio"
+	"github.com/NLstn/riffine/core/resource"
 )
+
+type waveformDecoder struct {
+	audio.WAVDecoder
+	inspections int
+}
+
+func (d *waveformDecoder) Inspect(ctx context.Context, r resource.Reader) (audio.Info, error) {
+	d.inspections++
+	return d.WAVDecoder.Inspect(ctx, r)
+}
+func (*waveformDecoder) OpenPCM(context.Context, resource.Reader) (audio.PCMStream, error) {
+	return nil, errors.New("waveform must reuse the current source inspection")
+}
 
 func TestOpenWaveformIdentityAndOwnedHandle(t *testing.T) {
 	var data bytes.Buffer
@@ -14,7 +29,8 @@ func TestOpenWaveformIdentityAndOwnedHandle(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := &memoryHost{data: map[string][]byte{"source": data.Bytes()}}
-	service := Service{Resources: h, Store: h, Decoder: audio.WAVDecoder{}}
+	decoder := &waveformDecoder{}
+	service := Service{Resources: h, Store: h, Decoder: decoder}
 	ctx := context.Background()
 	session, err := service.Import(ctx, "source", "project")
 	if err != nil {
@@ -23,6 +39,9 @@ func TestOpenWaveformIdentityAndOwnedHandle(t *testing.T) {
 	result, err := session.OpenWaveform(ctx, nil, nil)
 	if err != nil || h.opened != h.closed {
 		t.Fatal(err)
+	}
+	if decoder.inspections != 2 { // Import, then waveform identity verification.
+		t.Fatal("waveform repeated its source inspection", decoder.inspections)
 	}
 	opened := h.opened
 	for _, rangeFrames := range [][2]int64{{0, 9600}, {255, 257}, {9000, 9600}} {

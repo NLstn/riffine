@@ -1,6 +1,9 @@
 // RPC lives on the resource worker; terminating the decoder also cancels a long initial scan.
 let WorkerClass=globalThis.Worker;
 if(typeof process==='object' && process.versions?.node)WorkerClass=(await import('node:worker_threads')).Worker;
+// Only metadata measured from this exact immutable File may skip a duration
+// scan. Never key by filename/size or accept saved project metadata here.
+const inspections=new WeakMap();
 export function openCodec(file,codec,complete,failed) {
  let worker;
  try {worker=new WorkerClass(new URL('./codec-worker.mjs',import.meta.url),{type:'module'});}
@@ -28,7 +31,12 @@ export function openCodec(file,codec,complete,failed) {
   return fence=>{void close().then(()=>fence(''),error=>fence(String(error)));};
  }
  const port={call:invoke};
- const result=request('open',{file,codec});
- void result.then(info=>complete({info,port}),error=>{void close().then(()=>failed(String(error)));});
+ const cached=inspections.get(file);
+ const result=request('open',{file,codec,knownInfo:cached?.codec===codec ? cached.info : undefined});
+ void result.then(info=>{
+  if(closed)return;
+  inspections.set(file,{codec,info:{...info}});
+  complete({info,port});
+ },error=>{void close().then(()=>failed(String(error)));});
  return fence=>{void close().then(()=>fence(''),error=>fence(String(error)));};
 }

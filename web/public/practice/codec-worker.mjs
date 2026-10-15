@@ -10,7 +10,7 @@ if (typeof process === 'object' && process.versions?.node) {
 }
 let module, media, decoder=0, buffer=0, channels=0, frame=0, frames=0, opened=false;
 async function close() { if(media)await media.close(); media=null; if(decoder)module._riffine_browser_decoder_destroy(decoder); if(buffer)module._free(buffer); decoder=buffer=0; }
-async function receive({id,method,file,codec,count,position}) {
+async function receive({id,method,file,codec,knownInfo,count,position}) {
  try {
   if(method==='open') {
    if(opened)throw new Error('Decoder already opened.'); opened=true;
@@ -24,7 +24,7 @@ async function receive({id,method,file,codec,count,position}) {
    };
    if(codec===3||codec===4) {
     const {MediaDecoder}=await import('./media-decoder.mjs');
-    media=await MediaDecoder.open({size:file.size,read:readFile},codec);
+    media=await MediaDecoder.open({size:file.size,read:readFile},codec,knownInfo);
     channels=media.info.channels;frames=media.info.frames;
     send({id,result:media.info});return;
    }
