@@ -41,6 +41,34 @@ npm run dev
 The Vite development server listens on localhost. Folder access and tag reading
 run in the browser; audio files are not sent to a backend.
 
+### Hosted web version for testing
+
+Open **[Riffine on GitHub Pages](https://nlstn.github.io/riffine/)**.
+The first visit prepares the offline app and reloads once before opening the
+workspace. Try **Try a demo song**, or choose a local song; audio stays on your
+device. Device projects and browser permissions are specific to this hosted URL.
+
+The **Deploy web to GitHub Pages** workflow builds and deploys each push to
+`main`; it can also be run manually on `main` from GitHub Actions. Pull requests
+build and check the same `/riffine/` deployment without publishing. The build
+includes the Go core, pinned Emscripten DSP, codec assets and license notices.
+Repository **Settings → Pages → Source** must be **GitHub Actions**.
+
+GitHub Pages does not supply the isolation headers needed for shared-memory live
+audio. The app's scoped service worker supplies them before the workspace starts;
+service workers must be enabled. Updates wait until existing Riffine tabs close
+so an active practice session keeps its current version.
+
+To check the production build locally after building the browser core/DSP:
+
+```sh
+npm --prefix web ci
+npm --prefix web run build -- --base /riffine/
+node scripts/check-browser-offline.mjs
+npm --prefix web run preview -- --host 127.0.0.1
+# Open http://127.0.0.1:4173/riffine/
+```
+
 On Windows use `bin/riffine.exe` as the output name.
 
 Render/play also require CMake 3.24+, Git, and a C++17 compiler. On Windows use

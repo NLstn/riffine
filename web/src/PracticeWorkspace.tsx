@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { appPath } from './app-url';
 import type { KeyboardEvent } from "react";
 import {
   loadShortcuts,
@@ -1034,7 +1035,7 @@ export default function PracticeWorkspace({
                   type="button"
                   onClick={() =>
                     void run(async () => {
-                      const response = await fetch("/practice/demo.mp3");
+                      const response = await fetch(appPath('practice/demo.mp3'));
                       if (!response.ok)
                         throw new Error("The demo could not be loaded.");
                       const file = new File(
