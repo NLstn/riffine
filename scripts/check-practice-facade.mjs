@@ -15,6 +15,7 @@ class MockWorker {
 class MockAudioContext {
  static instances = [];
  constructor({ sampleRate }) { this.sampleRate = sampleRate; this.state = 'suspended'; this.closeCalls = 0; this.resumeCalls = 0; this.baseLatency = 0; this.outputLatency = 0; this.destination = {}; MockAudioContext.instances.push(this); }
+ createGain() { const gain = { gain: { value: 1, setTargetAtTime(value) { this.value = value; } }, connect(destination) { this.destination = destination; } }; this.outputGain = gain; return gain; }
  resume() { this.resumeCalls++; this.state = 'running'; return Promise.resolve(); }
  suspend() { this.state = 'suspended'; return Promise.resolve(); }
  close() { this.closeCalls++; this.state = 'closed'; return Promise.resolve(); }
@@ -53,9 +54,16 @@ client.dispose(); assert.equal(context.closeCalls, 1);
 
 client = new BrowserPractice({ loadOutput: () => Promise.resolve({ createOutputQueue: () => new SharedArrayBuffer(1) }) });
 worker = MockWorker.instances.at(-1); worker.emit({ type: 'ready' });
+client.setVolume(0.35);
 const active = client.preview(snapshot); await tick();
 const activeContext = MockAudioContext.instances.at(-1);
 assert(worker.sent.some(message => message.request?.type === 'preview'));
+assert.equal(activeContext.outputGain.gain.value, 0.35);
+assert.equal(activeContext.outputGain.destination, activeContext.destination);
+client.setVolume(0);
+assert.equal(activeContext.outputGain.gain.value, 0);
+client.setVolume(0.35);
+assert.equal(activeContext.outputGain.gain.value, 0.35);
 client.dispose(); await assert.rejects(active, /closed/);
 assert.equal(activeContext.closeCalls, 1); // dispose/finally share one close fence
 
@@ -174,11 +182,16 @@ async function nextRequest(type) {
  throw new Error('Core request missing: '+type);
 }
 function coreReply(request,value) {worker.emit({type:'result',id:request.id,response:{version:1,snapshot:value}});}
+client.setVolume(0.4);
 const livePlay=client.transport(liveSnapshot,{type:'play'});
 const originalLiveContext=MockAudioContext.instances.at(-1);
 assert.equal(originalLiveContext.resumeCalls,1);
 let attachRequest=await nextRequest('attach_transport');
 await hostRequest('open',{sampleRate:48000,channels:1});await hostRequest('reset');
+assert.equal(originalLiveContext.outputGain.gain.value,0.4);
+client.setVolume(0);
+assert.equal(originalLiveContext.outputGain.gain.value,0);
+client.setVolume(0.4);
 const attachedSnapshot={...liveSnapshot,sequence:3,capabilities:{...liveSnapshot.capabilities,liveTransport:true}};
 coreReply(attachRequest,attachedSnapshot);
 let playRequest=await nextRequest('command');assert.equal(playRequest.request.command.sequence,4);
@@ -191,6 +204,7 @@ const detachRequest=await nextRequest('detach_transport');await hostRequest('clo
 assert.equal(originalLiveContext.closeCalls,1);assert.equal(recoveredContext.closeCalls,0);
 coreReply(detachRequest,{...liveSnapshot,sequence:5});
 attachRequest=await nextRequest('attach_transport');await hostRequest('open',{sampleRate:48000,channels:1});await hostRequest('reset');
+assert.equal(recoveredContext.outputGain.gain.value,0.4);
 coreReply(attachRequest,{...attachedSnapshot,sequence:6});
 const stopRequest=await nextRequest('command');assert.equal(stopRequest.request.command.type,'stop');assert.equal(stopRequest.request.command.sequence,7);
 coreReply(stopRequest,{...attachedSnapshot,sequence:7});await recovering;

@@ -34,7 +34,7 @@ try {
   const file=new File(['generated fixture'],`library.${extension}`);
   const createFacade=()=>{
    const opening=deferred(),waveform=deferred();
-   const client={opening,openCalls:[],waveformCalls:[],disposals:0,
+   const client={volume:1,setVolume(value){this.volume=value;},opening,openCalls:[],waveformCalls:[],disposals:0,
     open(source){this.openCalls.push(source);return opening.promise;},
     waveform(start,end){this.waveformCalls.push([start,end]);return waveform.promise;},
     exportProject:async()=>{throw new Error('Active project export failed.');},
@@ -66,6 +66,12 @@ try {
    assert.equal(button('Open song').disabled,false);
    assert(document.body.textContent.includes(file.name));
    assert.equal(document.querySelector('[role="status"]').textContent,'Ready to practice. Select a phrase or press Play.');
+   assert.equal(active.volume,1);
+   await React.act(async()=>button('Mute').click());
+   assert.equal(active.volume,0);
+   assert.equal(document.querySelector('#practice-volume').value,'0');
+   await React.act(async()=>button('Unmute').click());
+   assert.equal(active.volume,1);
    // Ownership guards must still surface real failures from the live facade.
    await React.act(async()=>button('Download project').click());
    assert.equal(document.querySelector('[role="alert"]').textContent,'Active project export failed.');

@@ -68,6 +68,15 @@ export default function PracticeWorkspace({
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [wave, setWave] = useState<WaveWindow>();
   const [busy, setBusy] = useState(false);
+  const [volume, setVolume] = useState(100);
+  const [muted, setMuted] = useState(false);
+  const outputVolume = useRef(1);
+  const changeVolume = (level: number, mute: boolean) => {
+    setVolume(level);
+    setMuted(mute);
+    outputVolume.current = mute ? 0 : level / 100;
+    facade.current?.setVolume?.(outputVolume.current);
+  };
   const [previewControls, setPreviewControls] = useState(false);
   const [previewPaused, setPreviewPaused] = useState(false);
   const [previewControlBusy, setPreviewControlBusy] = useState(false);
@@ -251,6 +260,7 @@ export default function PracticeWorkspace({
       return;
     }
     facade.current = client;
+    client.setVolume?.(outputVolume.current);
     if (source) void run(() => open(source), "Opening library audio…");
     return () => {
       facade.current = null;
@@ -1099,6 +1109,18 @@ export default function PracticeWorkspace({
             <div className="player-time" aria-label="Playback position">
               <strong>{time(position)}</strong>
               <span>/ {time(duration)}</span>
+            </div>
+            <div className="player-volume" role="group" aria-label="Volume controls">
+              <button type="button" aria-label={muted || volume === 0 ? "Unmute" : "Mute"}
+                aria-pressed={muted || volume === 0}
+                onClick={() => changeVolume(volume || 100, !(muted || volume === 0))}>
+                {muted || volume === 0 ? "Unmute" : "Mute"}
+              </button>
+              <label htmlFor="practice-volume">Volume</label>
+              <input id="practice-volume" type="range" min="0" max="100" step="1"
+                value={muted ? 0 : volume} aria-valuetext={`${muted ? 0 : volume}%`}
+                onChange={(event) => changeVolume(Number(event.target.value), false)} />
+              <output htmlFor="practice-volume">{muted ? 0 : volume}%</output>
             </div>
             <div className="transport-secondary">
               <button

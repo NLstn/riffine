@@ -6,8 +6,9 @@ import { createPresentedCounter, PresentedWriter, PresentedState } from './prese
 // Main-thread half of the device port. Source/DSP ownership is on the resource
 // worker; this object owns only the context, callback gate and device timestamps.
 export class LiveOutputHost {
- constructor(context, channels, onFailure) {
+ constructor(context, channels, onFailure, destination = context.destination) {
   if (typeof context.getOutputTimestamp !== 'function' || (channels !== 1 && channels !== 2)) throw new Error('Presentation-aware browser output is unavailable.');
+  this.destination = destination;
   this.context = context; this.channels = channels; this.onFailure = onFailure;
   this.queue = undefined; this.writer = undefined; this.monitor = undefined;
   this.boundary = undefined; this.node = undefined; this.counter = undefined;
@@ -27,7 +28,7 @@ export class LiveOutputHost {
    this.boundary = new OutputBoundary(this.context, queue, this.monitor);
    this.node = new AudioWorkletNode(this.context, 'riffine-output', {numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [this.channels], processorOptions: {queue, timeline}});
    this.node.onprocessorerror = () => { void this.fail(new Error('Audio worklet failed.')).catch(() => {}); };
-   this.node.connect(this.context.destination);
+   this.node.connect(this.destination);
    return {queue, presented};
   } catch (error) { await this.fail(error); throw this.failure; }
  }
