@@ -4,7 +4,7 @@ import { parentPort, workerData } from 'node:worker_threads';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 const bytes = new Uint8Array(await readFile(workerData.source));
-let reads = 0, maxRead = 0;
+let reads = 0, maxRead = 0, codecOpens = 0;
 class LocalFile {
  constructor(data, size = data.length) { this.bytes = data; this.size = size; this.name = workerData.name; }
  slice(start, end) { return { file: this, start, end: Math.min(end, this.size) }; }
@@ -17,7 +17,7 @@ globalThis.FileReaderSync = class {
   return result.buffer;
  }
 };
-globalThis.postMessage = data => parentPort.postMessage({ ...data, reads, maxRead });
+globalThis.postMessage = data => parentPort.postMessage({ ...data, reads, maxRead, codecOpens });
 await import(pathToFileURL(workerData.loader));
 let liveReceive, projectStore;
 if (workerData.storage) {
@@ -31,7 +31,7 @@ if (workerData.storage) {
 if (workerData.codecs || workerData.preview || workerData.live) {
  globalThis.self = globalThis;
  const codec = await import('../web/public/practice/codec-port.mjs');
- globalThis.riffineCodecOpen = codec.openCodec;
+ globalThis.riffineCodecOpen = (...args) => {codecOpens++;return codec.openCodec(...args);};
 }
 if (workerData.preview || workerData.live) {
  const preview = await import('../web/public/practice/preview-worker.mjs');

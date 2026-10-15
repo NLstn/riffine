@@ -123,7 +123,12 @@ func OpenWithInfo(ctx context.Context, source resource.Reader, decoder audio.PCM
 			result.CacheError = e
 		}
 	}
-	stream, err := decoder.OpenPCM(ctx, source)
+	var stream audio.PCMStream
+	if verified, ok := decoder.(audio.VerifiedPCMDecoder); ok {
+		stream, err = verified.OpenVerifiedPCM(ctx, source, info)
+	} else {
+		stream, err = decoder.OpenPCM(ctx, source)
+	}
 	if err != nil {
 		return result, err
 	}
