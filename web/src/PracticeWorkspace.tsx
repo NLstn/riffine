@@ -876,6 +876,9 @@ export default function PracticeWorkspace({
             </p>
           </div>
           <div className="practice-actions">
+            <button type="button" disabled={controlsBusy} onClick={onClose}>
+              ← Song list
+            </button>
             <button
               type="button"
               disabled={controlsBusy}
@@ -910,9 +913,6 @@ export default function PracticeWorkspace({
                     Save a new device copy
                   </button>
                 )}
-                <button type="button" disabled={controlsBusy} onClick={onClose}>
-                  Close song
-                </button>
               </details>
             )}
           </div>

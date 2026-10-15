@@ -184,6 +184,17 @@ h2 {
   color: var(--lime);
   margin-left: 8px;
 }
+.library-topbar-label {
+  color: #e5eddb;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+.library-topbar-label span {
+  color: var(--muted);
+  font: 10px var(--mono);
+  letter-spacing: 0;
+  margin-left: 10px;
+}
 .studio-local {
   margin-left: auto;
   display: flex;
@@ -196,6 +207,16 @@ h2 {
   display: grid;
   grid-template-columns: 258px minmax(0, 1fr);
   min-height: calc(100vh - 76px);
+}
+.practice-overlay {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  overflow: auto;
+  background: var(--bg);
+}
+.practice-overlay .practice-workspace {
+  min-height: 100vh;
 }
 .project-sidebar {
   border-right: 1px solid var(--line);
@@ -838,8 +859,12 @@ h2 {
   font-size: 11px;
 }
 .studio-library {
-  padding: 30px clamp(20px, 4vw, 60px);
-  border-bottom: 1px solid var(--line);
+  width: min(1120px, 100%);
+  margin: 0 auto;
+  padding: 54px clamp(20px, 4vw, 60px) 36px;
+}
+.library-page {
+  min-height: calc(100vh - 76px);
   background: #20251b;
 }
 .library-drawer-heading {
@@ -850,6 +875,9 @@ h2 {
 }
 .library-drawer-heading h2 {
   font-size: 24px;
+  margin-bottom: 8px;
+}
+.library-drawer-heading h1 {
   margin-bottom: 8px;
 }
 .library-drawer-heading p,
@@ -870,8 +898,9 @@ h2 {
   font-size: 12px;
 }
 .library-song-list {
-  max-height: 350px;
+  max-height: min(58vh, 680px);
   overflow: auto;
+  border-top: 1px solid var(--line);
 }
 .library-song {
   display: flex;
@@ -1031,12 +1060,31 @@ h2 {
   .studio-topbar nav {
     gap: 2px;
   }
+  .library-topbar-label {
+    font-size: 10px;
+  }
   .studio-topbar nav button {
     font-size: 11px;
     padding: 8px;
   }
   .studio-local {
     display: none;
+  }
+  .library-page {
+    min-height: calc(100vh - 65px);
+  }
+  .studio-library {
+    padding: 32px 16px 24px;
+  }
+  .library-drawer-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .library-drawer-heading > .practice-actions {
+    width: 100%;
+  }
+  .library-drawer-heading > .practice-actions .primary-button {
+    width: 100%;
   }
   .practice-workspace {
     display: flex;

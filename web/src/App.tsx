@@ -13,7 +13,6 @@ export default function App() {
   const [practiceSource, setPracticeSource] = useState<File>();
   const [practiceKey, setPracticeKey] = useState(0);
   const [tracks, setTracks] = useState<MusicTrack[]>([]);
-  const [libraryOpen, setLibraryOpen] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [query, setQuery] = useState("");
   const [indexing, setIndexing] = useState(false);
@@ -38,7 +37,6 @@ export default function App() {
   const openTrack = (file: File) => {
     setPracticeSource(file);
     setPracticeKey((value) => value + 1);
-    setLibraryOpen(false);
   };
   const addFolder = async (name: string, files: File[]) => {
     setFolderName(name);
@@ -104,36 +102,24 @@ export default function App() {
             riffine<span className="brand-period">.</span>
           </span>
         </a>
-        <nav aria-label="Main navigation">
-          <button
-            type="button"
-            aria-pressed={!libraryOpen}
-            onClick={() => setLibraryOpen(false)}
-          >
-            Practice
-          </button>
-          <button
-            type="button"
-            aria-pressed={libraryOpen}
-            onClick={() => setLibraryOpen((value) => !value)}
-          >
-            Music library {tracks.length > 0 && <span>{tracks.length}</span>}
-          </button>
-          <a className="mobile-projects-link" href="#training-projects">
-            Projects
-          </a>
-        </nav>
+        <div className="library-topbar-label">
+          MUSIC LIBRARY {tracks.length > 0 && <span>{tracks.length} songs</span>}
+        </div>
         <span className="studio-local">
           <span className="local-dot" /> Audio stays on your device
         </span>
       </header>
-      {libraryOpen && (
+      <main id="top" className="library-page">
         <section className="studio-library" aria-label="Music library">
           <div className="library-drawer-heading">
             <div>
               <div className="eyebrow">YOUR MUSIC</div>
-              <h2>{folderName || "Find your next phrase."}</h2>
-              <p>Choose a song to open it in the waveform player.</p>
+              <h1>{folderName || "Find your next phrase."}</h1>
+              <p>
+                {folderName
+                  ? "Choose a song to open the practice player."
+                  : "Open a music folder, then choose a song to practice."}
+              </p>
             </div>
             <div className="practice-actions">
               <button
@@ -143,13 +129,6 @@ export default function App() {
                 onClick={openFolder}
               >
                 {folderName ? "Change folder" : "Choose music folder"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setLibraryOpen(false)}
-                aria-label="Close music library"
-              >
-                ×
               </button>
             </div>
           </div>
@@ -223,23 +202,25 @@ export default function App() {
           )}
           {!tracks.length && !indexing && (
             <p className="library-help">
-              WAV, MP3, FLAC, M4A and Opus. Pick a folder to browse, or open a
-              song directly in Practice.
+              WAV, MP3, FLAC, M4A and Opus. Choose a folder to keep its songs
+              here while you practice.
             </p>
           )}
         </section>
-      )}
-      <main id="top">
-        <PracticeWorkspace
-          key={practiceKey}
-          source={practiceSource}
-          librarySources={librarySources}
-          onClose={() => {
-            setPracticeSource(undefined);
-            setPracticeKey((value) => value + 1);
-          }}
-        />
       </main>
+      {practiceSource && (
+        <div className="practice-overlay" role="dialog" aria-modal="true" aria-label="Practice player">
+          <PracticeWorkspace
+            key={practiceKey}
+            source={practiceSource}
+            librarySources={librarySources}
+            onClose={() => {
+              setPracticeSource(undefined);
+              setPracticeKey((value) => value + 1);
+            }}
+          />
+        </div>
+      )}
       <OfflineStatus />
     </div>
   );
