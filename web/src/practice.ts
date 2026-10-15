@@ -30,6 +30,7 @@ export interface PracticeFacade {
  exportProject(): Promise<PracticeResponse>;
  openLocal?(source: File, handle: string): Promise<PracticeResponse>;
  saveLocal?(copy?: boolean): Promise<PracticeResponse>;
+ setVolume?(volume: number): void;
  liveSupported?: boolean;
  transport?(snapshot: Snapshot, command: LiveCommand): Promise<PracticeResponse>;
  pollTransport?(): Promise<PracticeResponse>;
@@ -67,10 +68,25 @@ export class BrowserPractice implements PracticeFacade {
  private shutdownError?: Error;
  private shutdownKind?: 'dispose' | 'failure';
  private audio?: AudioContext;
+ private volume = 1;
+ private gains = new WeakMap<AudioContext, GainNode>();
+ setVolume(volume: number) {
+  if (!Number.isFinite(volume)) return;
+  this.volume = Math.max(0, Math.min(1, volume));
+  const gain = this.audio && this.gains.get(this.audio);
+  if (gain && this.audio?.state !== 'closed') gain.gain.setTargetAtTime(this.volume, this.audio!.currentTime, 0.01);
+ }
+ private output(context: AudioContext) {
+  const gain = context.createGain();
+  gain.gain.value = this.volume;
+  gain.connect(context.destination);
+  this.gains.set(context, gain);
+  return gain;
+ }
  private outputBoundary?: OutputBoundaryPort;
  private previewAbort?: (error?: Error) => void;
  private loadOutput: () => Promise<OutputQueueFactory>;
- private loadLive: () => Promise<{LiveOutputHost: new (context: AudioContext, channels: number, onFailure: (error: Error) => void) => LiveHostPort}>;
+ private loadLive: () => Promise<{LiveOutputHost: new (context: AudioContext, channels: number, onFailure: (error: Error) => void, destination?: AudioNode) => LiveHostPort}>;
  private audioClosures = new WeakMap<AudioContext, Promise<void>>();
  private readyCancel?: (error: Error) => void;
  private readyTimeout?: ReturnType<typeof setTimeout>;
@@ -211,7 +227,7 @@ export class BrowserPractice implements PracticeFacade {
     await Promise.race([Promise.all([resumed,beforeInstall]),cancelled]);
     this.ensureOpen();
     this.audio = context;
-    this.liveHost = new module.LiveOutputHost(context,snapshot.project.track.audio.channels,error => console.warn('[riffine] Live output stopped:',error.message));
+    this.liveHost = new module.LiveOutputHost(context,snapshot.project.track.audio.channels,error => console.warn('[riffine] Live output stopped:',error.message), this.output(context));
    } catch (error) { await this.closeAudio(context); if (this.audio === context) this.audio = undefined; if (this.liveHost?.context === context) this.liveHost = undefined; throw error; }
   })();
   this.liveSetup = ready; void ready.catch(() => {});
@@ -270,7 +286,7 @@ export class BrowserPractice implements PracticeFacade {
    await Promise.race([context.audioWorklet.addModule(appPath('practice/output-worklet.mjs')), cancelled]);
    node = new AudioWorkletNode(context, 'riffine-output', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [info.channels], processorOptions: { queue, timeline } });
    node.onprocessorerror = () => this.cancel();
-   node.connect(context.destination);
+   node.connect(this.output(context));
    await Promise.race([resumed, cancelled]);
    this.ensureOpen();
    if (timeline && queueModule.PresentationMonitor) presentation = new queueModule.PresentationMonitor(context, timeline, error => { abortPreview(error); this.cancel(); });

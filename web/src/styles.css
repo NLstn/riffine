@@ -574,6 +574,7 @@ h2 {
   margin: 12px 0 18px;
 }
 .player-transport {
+  flex-wrap: wrap;
   display: flex;
   align-items: center;
   gap: 24px;
@@ -1213,3 +1214,8 @@ h2 {
     margin-top: 14px;
   }
 }
+
+.player-volume { display: flex; align-items: center; gap: 8px; }
+.player-volume label { font-size: 11px; color: var(--muted); }
+.player-volume input { width: 90px; min-width: 0; accent-color: var(--lime); }
+.player-volume output { min-width: 4ch; font: 11px var(--mono); color: var(--muted); }
