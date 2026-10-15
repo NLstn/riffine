@@ -44,8 +44,9 @@ run in the browser; audio files are not sent to a backend.
 ### Hosted web version for testing
 
 Open **[Riffine on GitHub Pages](https://nlstn.github.io/riffine/)**.
-The first visit prepares the offline app and reloads once before opening the
-workspace. Try **Try a demo song**, or choose a local song; audio stays on your
+The first visit installs a small startup shell and reloads once to enable live
+audio. The workspace then opens while the complete offline app downloads in
+the background, with up to six downloads at a time. Try **Try a demo song**, or choose a local song; audio stays on your
 device. Device projects and browser permissions are specific to this hosted URL.
 
 The **Deploy web to GitHub Pages** workflow builds and deploys each push to
@@ -56,7 +57,9 @@ Repository **Settings → Pages → Source** must be **GitHub Actions**.
 
 GitHub Pages does not supply the isolation headers needed for shared-memory live
 audio. The app's scoped service worker supplies them before the workspace starts;
-service workers must be enabled. Updates wait until existing Riffine tabs close
+service workers must be enabled. Cached files are reused on reload and unchanged files are reused across updates.
+License notices and corresponding sources remain packaged and available without
+being prefetched. Updates wait until existing Riffine tabs close
 so an active practice session keeps its current version.
 
 To check the production build locally after building the browser core/DSP:
