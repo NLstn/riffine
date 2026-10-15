@@ -49,7 +49,7 @@ export class ScheduledSelections {
   try {
    if (selection.info().outputFrames !== s.outputEnd - s.outputStart) throw new Error('Scheduled output length differs from shared processing.');
    this.ledger.accept(s);
-   this.jobs.push({schedule: Object.freeze(s), selection, mixer, read: 0, generated:0});
+   this.jobs.push({schedule: Object.freeze(s), sourceStart:s.startFrame, sourceFrames:s.endFrame-s.startFrame, outputStart:s.outputStart, selection, mixer, read: 0, generated:0});
   } catch (error) { selection.close(); mixer?.close(); throw error; }
   this.ensurePump();
  }
@@ -67,6 +67,13 @@ export class ScheduledSelections {
    try {
     for (;;) {
      if (epoch !== this.epoch) return;
+     // Keep a small reserve instead of filling the entire 32768-frame ring.
+     // Parameter changes then reach the device without a long stale PCM queue.
+     try {
+      const output=this.writer.snapshot();
+      if(this.queuedFrames-output.copiedFrames>=4096){await delay();continue;}
+     }
+     catch(error){if(!(error instanceof CountersBusyError))throw error;await delay();continue;}
      const result = job.selection.read(4096);
      if (result.frames) {
       if (job.mixer) {
@@ -79,20 +86,52 @@ export class ScheduledSelections {
       this.queuedFrames += result.frames;
      }
      if (result.needsInput) {
-      const count = Math.min(512, s.endFrame - s.startFrame - job.read);
+      this.applyPendingParameters(job);
+      const count = Math.min(512, job.sourceFrames - job.read);
       if (count < 1) throw new Error('Scheduled processing requested source beyond its range.');
-      const pcm = await this.readPCM(s.startFrame + job.read, count);
+      const pcm = await this.readPCM(job.sourceStart + job.read, count);
       if (epoch !== this.epoch) return;
       if (!(pcm instanceof Float32Array) || pcm.length !== count * this.info.channels) throw new Error('Decoded schedule block has the wrong dimensions.');
       job.selection.push(pcm); job.read += count;
      } else if (!result.frames) {
-      if (job.read !== s.endFrame - s.startFrame || this.queuedFrames !== s.outputEnd) throw new Error('Scheduled processing duration mismatch.');
+      if (job.read !== job.sourceFrames || this.queuedFrames !== job.schedule.outputEnd) throw new Error('Scheduled processing duration mismatch.');
       break;
      }
     }
    } finally { job.selection.close(); job.mixer?.close(); }
    this.jobs.shift();
   }
+  this.finishParameterUpdate({applied:false});
+ }
+ async configure(sequence,speed,pitch) {
+  if(this.parameterUpdate)throw new Error('Another parameter update is pending.');
+  if(!this.task||!this.jobs.length||this.jobs[0].schedule.phase||this.jobs[0].mixer)return {applied:false,acknowledgements:[]};
+  return new Promise((resolve,reject)=>{
+   const timer=setTimeout(()=>this.fail(new Error('Live parameter update did not reach a processing boundary.')),10000);
+   this.parameterUpdate={sequence,speed,pitch,resolve,reject,timer,acknowledgements:[]};
+  });
+ }
+ finishParameterUpdate(result) {
+  const update=this.parameterUpdate;if(!update)return;
+  this.parameterUpdate=undefined;clearTimeout(update.timer);update.resolve({...result,acknowledgements:update.acknowledgements});
+ }
+ applyPendingParameters(job) {
+  const update=this.parameterUpdate;if(!update)return;
+  if(update.acknowledgements.length===128){this.finishParameterUpdate({applied:false});return;}
+  update.acknowledgements.push(...this.drain(128-update.acknowledgements.length));
+  if(this.failure)throw this.failure;
+  // A preceding parameter prefix may still be in the device's synthesis/output
+  // buffers. Continue feeding it until presentation acknowledges its boundary.
+  if(this.ledger.entries[0]?.sequence!==job.schedule.sequence)return;
+  if(job.schedule.phase||job.mixer){this.finishParameterUpdate({applied:false});return;}
+  const change=job.selection.configure(update.speed,update.pitch);
+  if(!change){this.finishParameterUpdate({applied:false});return;}
+  const old=job.schedule, outputFrame=job.outputStart+change.outputFrame, sourceFrame=job.sourceStart+change.sourceFrame;
+  const replacement={...old,sequence:update.sequence,startFrame:sourceFrame,outputStart:outputFrame,outputEnd:job.outputStart+change.outputFrames,speed:update.speed,pitch:update.pitch,edgeFadeFrames:0};
+  this.ledger.replaceTail(old.sequence,outputFrame,replacement);
+  for(const future of this.jobs.splice(1)){future.selection.close();future.mixer?.close();}
+  job.schedule=Object.freeze(replacement);
+  this.finishParameterUpdate({applied:true,sequence:old.sequence,sourceFrame,outputFrame,outputEnd:replacement.outputEnd});
  }
  async prefilled() {
   const started = performance.now();
@@ -129,12 +168,14 @@ export class ScheduledSelections {
   if (this.failure) return;
   this.failure = error instanceof Error ? error : new Error(String(error));
   this.writer?.close(); this.epoch++;
+  const update=this.parameterUpdate;this.parameterUpdate=undefined;if(update){clearTimeout(update.timer);update.reject(this.failure);}
   // Notification runs on this control worker. Host owns the asynchronous device
   // stop fence and failed-counter publication; never call core from this hook.
   try { this.onFailure(this.failure); } catch (notificationError) { this.failure = new AggregateError([this.failure, notificationError], 'Device failure notification failed.'); }
  }
  async stopProcessing() {
   this.epoch++; this.writer?.close();
+  this.finishParameterUpdate({applied:false});
   await this.task;
   for (const job of this.jobs) {job.selection.close();job.mixer?.close();} this.jobs = [];
  }

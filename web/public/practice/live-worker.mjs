@@ -33,6 +33,7 @@ class Device {
    return {};
   }
   if (method === 'schedule') { this.processing.schedule(args); return {}; }
+  if (method === 'configure') return this.processing.configure(args.sequence,args.speed,args.pitch);
   if (method === 'start') { await this.processing.prefilled(); await hostCall('start'); return {}; }
   if (method === 'suspend') { await hostCall('suspend'); return this.processing.drain(128); }
   throw new Error('Unknown browser live control operation.');

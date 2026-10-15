@@ -73,6 +73,8 @@ jobs:
       - run: node scripts/check-browser-presentation.mjs
       - run: node scripts/check-browser-boundary.mjs
       - run: node scripts/check-browser-live-host.mjs
+      - run: node scripts/check-browser-parameters.mjs
+      - run: RIFFINE_LIVE_PARAMETERS=1 RIFFINE_LIVE_SOURCE=web/public/practice/demo.wav node scripts/check-browser-live-binding.mjs
       - run: node --experimental-strip-types scripts/check-practice-facade.mjs
       - run: node scripts/check-practice-workspace.mjs
       - run: node scripts/check-practice-waveform.mjs

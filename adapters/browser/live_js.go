@@ -256,6 +256,54 @@ func (d *liveDevice) Start(ctx context.Context) error {
 	return err
 }
 
+func (d *liveDevice) ConfigureParameters(ctx context.Context, sequence uint64, speed, pitch float64) (engine.ParameterChange, error) {
+	text, err := d.call(ctx, "configure", map[string]any{"sequence": strconv.FormatUint(sequence, 10), "speed": speed, "pitch": pitch})
+	var wire struct {
+		Applied          bool            `json:"applied"`
+		Sequence         string          `json:"sequence"`
+		SourceFrame      int64           `json:"sourceFrame"`
+		OutputFrame      int64           `json:"outputFrame"`
+		OutputEnd        int64           `json:"outputEnd"`
+		Acknowledgements json.RawMessage `json:"acknowledgements"`
+	}
+	if err != nil {
+		return engine.ParameterChange{}, err
+	}
+	if err = json.Unmarshal([]byte(text), &wire); err != nil {
+		return engine.ParameterChange{}, err
+	}
+	change := engine.ParameterChange{Applied: wire.Applied, SourceFrame: wire.SourceFrame, OutputFrame: wire.OutputFrame, OutputEnd: wire.OutputEnd}
+	if change.Acknowledgements, err = decodeLiveAcks(string(wire.Acknowledgements), 128); err != nil {
+		return change, err
+	}
+	if !wire.Applied {
+		return change, nil
+	}
+	if change.Sequence, err = strconv.ParseUint(wire.Sequence, 10, 64); err != nil {
+		return change, err
+	}
+	d.scheduleMu.Lock()
+	defer d.scheduleMu.Unlock()
+	old, ok := d.schedules[change.Sequence]
+	if !ok {
+		return change, errors.New("parameter update references unknown schedule")
+	}
+	prefix := old
+	prefix.EndFrame = change.SourceFrame
+	prefix.OutputEnd = change.OutputFrame
+	prefix.EdgeFadeFrames = 0
+	tail := old
+	tail.Sequence = sequence
+	tail.StartFrame = change.SourceFrame
+	tail.OutputStart = change.OutputFrame
+	tail.OutputEnd = change.OutputEnd
+	tail.Speed = speed
+	tail.Pitch = pitch
+	tail.EdgeFadeFrames = 0
+	d.schedules = map[uint64]engine.Schedule{prefix.Sequence: prefix, tail.Sequence: tail}
+	return change, nil
+}
+
 func (d *liveDevice) Suspend(ctx context.Context) ([]engine.OutputAcknowledgement, error) {
 	text, err := d.call(ctx, "suspend", struct{}{})
 	if err != nil {

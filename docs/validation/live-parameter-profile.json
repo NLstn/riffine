@@ -1,0 +1,32 @@
+{
+  "date": "2026-10-14",
+  "browser": "Codex in-app browser, Chrome/155 on macOS",
+  "sampleRate": 48000,
+  "source": "Generated 3-second 440 Hz WAV, loop [0, 2.8)",
+  "edits": "12 alternating edits: speed 0.75/pitch +3, speed 1/pitch 0",
+  "detector": "2048-frame FFT, peak within 25 Hz of target, > -50 dB; silence RMS squared < 0.00001; sampled every 4 ms",
+  "baseline": {
+    "revision": "f94f35101723",
+    "uiDelayMs": 60,
+    "commandMs": [123.815, 166.640, 141.180, 159.475, 134.165, 162.685, 134.785, 165.560, 101.550, 166.375, 127.940, 158.315],
+    "observedPitchMs": [209.445, 237.530, 213.875, 230.980, 206.630, 235.920, 207.865, 242.220, 176.365, 241.885, 199.265, 233.680],
+    "quietMs": [84.830, 120.005, 93.530, 114.830, 89.005, 117.715, 85.155, 117.285, 0, 121.645, 81.460, 0],
+    "resets": 12,
+    "suspends": 12,
+    "underrunFrames": 0,
+    "baseLatencySeconds": 0.0058125,
+    "outputLatencySeconds": 0.032
+  },
+  "updated": {
+    "uiDelayMs": 0,
+    "outputReserveFrames": 4096,
+    "commandMs": [5.880, 11.755, 3.700, 14.705, 5.025, 6.650, 4.045, 9.395, 12.075, 24.260, 15.190, 13.445],
+    "observedPitchMs": [167.695, 192.690, 171.660, 191.700, 195.510, 194.370, 197.355, 199.445, 195.095, 196.270, 199.505, 195.925],
+    "quietMs": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    "resets": 0,
+    "suspends": 0,
+    "underrunFrames": 0,
+    "baseLatencySeconds": 0.0058125,
+    "outputLatencySeconds": 0.032
+  }
+}

@@ -9,7 +9,8 @@ after a successful attachment.
 
 ## Worker ownership and routing
 
-`ScheduledSelections` accepts at most two outstanding ordered schedules. Each
+`ScheduledSelections` accepts two outstanding traversals, plus one temporary
+presentation prefix during [continuous parameter edits](live-parameters.md). Each
 schedule supplies its verified source handle/range, speed/pitch, exact output
 range and explicit edge fade. C++ checks processing dimensions and applies the
 gains; the host does not invent loop/routine policy. Decoding requests absolute
@@ -22,7 +23,7 @@ A fixed 32-byte shared counter carries the main thread's mapped PCM presentation
 position and lifecycle state back to the resource worker. Low/high frame words
 are published through a bounded seqlock. Busy snapshots return no new evidence.
 Fresh buffers identify each generation; old counters cannot affect its schedules.
-A separate two-entry ledger routes cumulative presented frames to ordered partial
+A separate bounded ledger routes cumulative presented frames to ordered partial
 and complete schedule acknowledgements. Bounded draining retains undelivered
 entries. Duplicate device positions produce no duplicate acknowledgement.
 

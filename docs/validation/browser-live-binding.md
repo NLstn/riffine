@@ -1,5 +1,9 @@
 # Browser live session binding
 
+Speed/pitch edits now support [continuous changes with before/after profiling](live-parameters.md).
+The historical generation-reset edit evidence below describes the earlier path;
+unsupported live-update cases retain that fallback.
+
 The practice workspace can now attach a presentation-aware browser device to the
 actual Go session. Play, Pause, Stop, Restart, Seek and speed/pitch/A/B changes
 route through the versioned shared-core binding. React polls snapshots every
