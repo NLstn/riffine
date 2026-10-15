@@ -33,6 +33,13 @@ func (WAVDecoder) Peaks(ctx context.Context, r resource.Reader, bins int) (Wavef
 type PCMDecoder interface {
 	OpenPCM(context.Context, resource.Reader) (PCMStream, error)
 }
+
+// VerifiedPCMDecoder can reuse an inspection of the same stable reader. Info
+// must come from Inspect, including in-memory offsets, never from project JSON.
+type VerifiedPCMDecoder interface {
+	OpenVerifiedPCM(context.Context, resource.Reader, Info) (PCMStream, error)
+}
+
 type PCMStream interface {
 	ReadFrames(context.Context, []float32) (int, error)
 	SeekFrame(context.Context, int64) error

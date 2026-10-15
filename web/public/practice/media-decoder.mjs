@@ -1,7 +1,7 @@
 // M4A and Ogg Opus cursor, owned by the cancellable codec worker.
 // Reads original File slices; retains one compressed packet and one PCM block.
 export class MediaDecoder {
- static async open(source, codec) {
+ static async open(source, codec, knownInfo) {
   const [{default: LibAV}, {default: factory}] = await Promise.all([
    import('./media/libav.mjs'), import('./media/factory.mjs'),
   ]);
@@ -9,6 +9,13 @@ export class MediaDecoder {
   const av = await LibAV.LibAV({noworker:true, nosimd:true, nothreads:true});
   const cursor = new MediaDecoder(av, codec);
   try {
+   if (knownInfo) {
+    if (!Number.isSafeInteger(knownInfo.frames) || knownInfo.frames<1 || knownInfo.frames>2**48 ||
+        !Number.isInteger(knownInfo.channels) || knownInfo.channels<1 || knownInfo.channels>2 ||
+        !Number.isInteger(knownInfo.sampleRate) || knownInfo.sampleRate<8000 || knownInfo.sampleRate>192000 ||
+        (codec===3 ? !['aac','alac'].includes(knownInfo.encoding) : knownInfo.encoding!=='opus')) throw new Error('Invalid inspected audio dimensions.');
+    cursor.info={...knownInfo};
+   }
    await av.av_log_set_level(av.AV_LOG_ERROR);
    av.onblockread = async (name, position, length) => {
     try {
@@ -22,6 +29,10 @@ export class MediaDecoder {
    };
    await av.mkblockreaderdev(cursor.name, source.size);
    await cursor.reset();
+   if (knownInfo) {
+    if (cursor.encoding!==knownInfo.encoding) throw new Error('Inspected audio encoding changed.');
+    return cursor;
+   }
    // Count actual decoded samples (including codec delay/padding rules), without
    // retaining the song. Metadata alone is not an exact source-frame clock.
    let frames = 0, block;

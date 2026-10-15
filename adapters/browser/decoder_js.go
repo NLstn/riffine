@@ -51,6 +51,33 @@ func (d Decoder) Inspect(ctx context.Context, r resource.Reader) (audio.Info, er
 	if err := ctx.Err(); err != nil {
 		return audio.Info{}, err
 	}
+	reader, immutable := r.(*fileReader)
+	if immutable {
+		reader.mu.Lock()
+		closed := reader.closed
+		reader.mu.Unlock()
+		if closed {
+			return audio.Info{}, errors.New("selected file reader is closed")
+		}
+		reader.owner.mu.Lock()
+		cached := reader.owner.inspection
+		reader.owner.mu.Unlock()
+		if cached != nil {
+			return *cached, nil
+		}
+	}
+	info, err := d.inspect(ctx, r)
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err == nil && immutable {
+		reader.owner.mu.Lock()
+		reader.owner.inspection = &info
+		reader.owner.mu.Unlock()
+	}
+	return info, err
+}
+func (d Decoder) inspect(ctx context.Context, r resource.Reader) (audio.Info, error) {
 	codec, err := sourceCodec(r)
 	if err != nil {
 		return audio.Info{}, err

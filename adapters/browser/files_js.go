@@ -16,6 +16,7 @@ import (
 	"syscall/js"
 	"time"
 
+	"github.com/NLstn/riffine/core/audio"
 	"github.com/NLstn/riffine/core/project"
 	"github.com/NLstn/riffine/core/resource"
 )
@@ -23,6 +24,10 @@ import (
 type Files struct {
 	file     js.Value
 	document []byte
+	mu       sync.Mutex
+	// A selected File is immutable. Keep only its successful original-byte
+	// inspection; each new selection gets a separate Files owner.
+	inspection *audio.Info
 }
 
 func NewFiles(file js.Value, document []byte) (*Files, error) {
@@ -42,7 +47,7 @@ func (f *Files) Open(ctx context.Context, handle string) (resource.Reader, error
 	if handle != "source" {
 		return nil, errors.New("source handle is unavailable")
 	}
-	return &fileReader{file: f.file, reader: js.Global().Get("FileReaderSync").New(), size: int64(f.file.Get("size").Float()), name: f.file.Get("name").String()}, nil
+	return &fileReader{owner: f, file: f.file, reader: js.Global().Get("FileReaderSync").New(), size: int64(f.file.Get("size").Float()), name: f.file.Get("name").String(), nextYield: time.Now().Add(8 * time.Millisecond)}, nil
 }
 func (f *Files) Resolve(ctx context.Context, document, reference string) (string, error) {
 	if err := ctx.Err(); err != nil {
@@ -89,10 +94,12 @@ func (f *Files) Create(ctx context.Context, document string, data []byte) error 
 
 type fileReader struct {
 	mu           sync.Mutex
+	owner        *Files
 	file, reader js.Value
 	size         int64
 	name         string
 	closed       bool
+	nextYield    time.Time
 }
 
 func (r *fileReader) Name() string { return r.name }
@@ -118,9 +125,13 @@ func (r *fileReader) ReadAt(dst []byte, offset int64) (n int, err error) {
 		return 0, io.EOF
 	}
 	for n < len(dst) && offset+int64(n) < r.size {
-		// Yield to the worker event loop so a cancellation message can run between
-		// fixed source reads. File data is immutable; no full source ArrayBuffer copy.
-		time.Sleep(time.Millisecond)
+		// Bound uninterrupted work, rather than paying a browser timer (often
+		// clamped to several milliseconds) for every small fingerprint/PCM read.
+		// This still lets cancellation messages run between bounded source reads.
+		if !time.Now().Before(r.nextYield) {
+			time.Sleep(time.Millisecond)
+			r.nextYield = time.Now().Add(8 * time.Millisecond)
+		}
 		end := min(offset+int64(n)+int64(min(len(dst)-n, 64<<10)), r.size)
 		buffer := r.reader.Call("readAsArrayBuffer", r.file.Call("slice", float64(offset+int64(n)), float64(end)))
 		view := js.Global().Get("Uint8Array").New(buffer)

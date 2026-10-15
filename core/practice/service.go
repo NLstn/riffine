@@ -564,12 +564,12 @@ func (s *Session) OpenWaveform(ctx context.Context, cache waveform.Cache, progre
 	if !ok {
 		return waveform.Result{}, failure(UnsupportedCapability, errors.New("streaming waveform decoding is unavailable"))
 	}
-	r, err := s.openVerified(ctx, s.source)
+	r, info, err := s.openVerifiedAudio(ctx, s.source)
 	if err != nil {
 		return waveform.Result{}, err
 	}
 	defer r.Close()
-	result, err := waveform.OpenWithInfo(ctx, r, decoder, s.p.Track.Audio, cache, progress)
+	result, err := waveform.OpenWithInfo(ctx, r, decoder, info, cache, progress)
 	if err != nil {
 		return result, failure(HostFailure, err)
 	}

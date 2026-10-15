@@ -38,10 +38,11 @@ for(const [suffix,codec] of formats) {
   reference=new Float32Array(nativePCM.stdout.buffer,nativePCM.stdout.byteOffset,nativePCM.stdout.byteLength/4);
  } else expected=fixture.audio;
  const {info,port}=await open(file,codec);
+ let originalPCM;
  try {
   for(const key of ['encoding','channels','sampleRate','frames'])assert.equal(info[key],expected[key]);
   if(reference)assert.equal(reference.length,info.frames*info.channels);
-  const decoded=new Float32Array(info.frames*info.channels);let offset=0;
+  const decoded=new Float32Array(info.frames*info.channels);originalPCM=decoded;let offset=0;
   for(;;){const {frames,pcm}=await call(port,'read',{count:8192});if(!frames)break;const block=new Float32Array(pcm.buffer,pcm.byteOffset,pcm.byteLength/4);decoded.set(block,offset);offset+=block.length;}
   assert.equal(offset,decoded.length);let maxDifference=0;
   for(let i=0;i<decoded.length;i++){assert(Number.isFinite(decoded[i]));if(reference)maxDifference=Math.max(maxDifference,Math.abs(decoded[i]-reference[i]));}
@@ -56,6 +57,24 @@ for(const [suffix,codec] of formats) {
   await assert.rejects(call(port,'seek',{position:info.frames+1}),/Invalid source seek/);
   results.push({codec:suffix,frames:info.frames,referencePCMMaximumDifference:maxDifference,exactRandomSeeks:true});
  } finally {await call(port,'close');}
+ // A second cursor on the exact File reuses measured duration metadata. Its
+ // full output, EOF and backwards seeks must still be sample-identical.
+ const warm=await open(file,codec);
+ try {
+  assert.deepEqual(warm.info,info);
+  let offset=0;
+  for(;;){
+   const {frames,pcm}=await call(warm.port,'read',{count:8192});if(!frames)break;
+   const block=new Float32Array(pcm.buffer,pcm.byteOffset,pcm.byteLength/4);
+   assert.deepEqual(block,originalPCM.subarray(offset,offset+block.length));offset+=block.length;
+  }
+  assert.equal(offset,info.frames*info.channels);
+  await call(warm.port,'seek',{position:12345});
+  const {frames,pcm}=await call(warm.port,'read',{count:512});
+  assert.equal(frames,512);
+  assert.deepEqual(new Float32Array(pcm.buffer,pcm.byteOffset,pcm.byteLength/4),originalPCM.subarray(12345*info.channels,12857*info.channels));
+ } finally {await call(warm.port,'close');}
+ results.at(-1).reusedInspectionExactPCM=true;
  // The actual Go resource/binding path retains the original SHA and saved source units.
  const worker=new Worker(new URL('./browser-practice-node-worker.mjs',import.meta.url),{workerData:{source,name:file.name,loader:resolve('web/public/practice/wasm_exec.js'),wasm:resolve('web/public/practice/core.wasm'),codecs:true,preview:!mediaOnly}});
  let next=0,readyResolve,readyReject;const pending=new Map();
@@ -63,7 +82,8 @@ for(const [suffix,codec] of formats) {
  worker.on('error',error=>{readyReject(error);for(const item of pending.values())item.reject(error);});
  worker.on('message',message=>{if(message.type==='ready')readyResolve();if(message.type==='result'){const item=pending.get(message.id);pending.delete(message.id);item?.resolve(message);}});
  const request=(request,extra={})=>new Promise((resolve,reject)=>{const id=++next;pending.set(id,{resolve,reject});worker.postMessage({id,request:{version:1,...request},...extra});});
- const response=async(requestFields,extra)=>{const message=await request(requestFields,extra);assert.equal(message.response.error,undefined);assert(message.maxRead<=65536);return message.response;};
+ let lastMessage;
+ const response=async(requestFields,extra)=>{const message=await request(requestFields,extra);assert.equal(message.response.error,undefined);assert(message.maxRead<=65536);lastMessage=message;return message.response;};
  const deadline=setTimeout(()=>{readyReject(new Error('Codec binding timeout'));for(const item of pending.values())item.reject(new Error('Codec binding timeout'));worker.terminate();},30000);
  try {
   await ready;
@@ -72,12 +92,18 @@ for(const [suffix,codec] of formats) {
   const projectInfo={...expected};if(!projectInfo.bits)delete projectInfo.bits;
   assert.deepEqual(track.audio,{...projectInfo,sha256:createHash('sha256').update(bytes).digest('hex')});
   assert.deepEqual(result.snapshot.capabilities.formats,['wav-pcm','mp3','flac','aac','alac','opus']);
+  const inspectedReads=lastMessage.reads;
+  assert.equal(lastMessage.codecOpens,1);
   result=await response({type:'waveform',startFrame:0,endFrame:expected.frames,bins:32});assert(result.window.cells.length>0);
+  assert.equal(lastMessage.codecOpens,2,'waveform should open only its PCM cursor');
+  assert.equal(lastMessage.reads-inspectedReads,codec===2?1:0,'immutable File was fingerprinted again');
   result=await response({type:'detail',startFrame:12345,endFrame:12348,bins:3});assert.equal(result.window.cells.length,3);
   for(let i=0;i<3;i++)for(let c=0;c<expected.channels;c++)assert(Math.abs(result.window.cells[i].channels[c].min-reference[(12345+i)*expected.channels+c])<.00004);
   await response({type:'command',command:{version:1,sequence:1,type:'set_parameters',speed:.75,pitch:-2}});
   await response({type:'command',command:{version:1,sequence:2,type:'set_loop',loop:{enabled:true,start:.25,end:.75}}});
   const saved=(await response({type:'export'})).document;
+  const mismatch=await request({type:'open',source:'source',document:'project'},{file:'changed',document:saved});
+  assert.equal(mismatch.response.error?.code,'identity_mismatch','same-name, same-size replacement reused an old fingerprint');
   result=await response({type:'open',source:'source',document:'project'},{file:'source',document:saved});
   assert.equal(result.snapshot.project.settings.speed,.75);assert.equal(result.snapshot.project.settings.pitch,-2);assert.equal(result.snapshot.project.settings.loop.enabled,true);assert.equal(result.snapshot.project.track.audio.sha256,track.audio.sha256);
   // Cancel a new open while the separate decoder is initializing. Old session survives.
