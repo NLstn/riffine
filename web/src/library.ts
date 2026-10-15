@@ -1,5 +1,3 @@
-import { parseBlob } from 'music-metadata';
-
 export interface MusicTrack {
   id: string;
   file: File;
@@ -36,6 +34,7 @@ export function isMusicFile(file: File): boolean {
 export async function readTrack(file: File, relativePath: string): Promise<MusicTrack> {
   const fallbackTitle = file.name.replace(/\.[^.]+$/, '');
   try {
+    const { parseBlob } = await import('music-metadata');
     const metadata = await parseBlob(file, { duration: true });
     const picture = metadata.common.picture?.[0];
     let artworkUrl: string | undefined;

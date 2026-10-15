@@ -46,7 +46,9 @@ jobs:
           PAGES_BASE: /${{ github.event.repository.name }}/
         run: npm --prefix web run build -- --base "$PAGES_BASE"
       - name: Verify scoped offline shell and isolation headers
-        run: node scripts/check-browser-offline.mjs
+        run: |
+          node scripts/check-browser-offline.mjs
+          node --experimental-strip-types scripts/check-browser-startup.mjs
       - uses: actions/upload-pages-artifact@v4
         with:
           path: web/dist
