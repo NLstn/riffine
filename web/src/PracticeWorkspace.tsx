@@ -443,7 +443,7 @@ export default function PracticeWorkspace({
     setLiveUpdating(true);
     pendingEdits.current.set(command.type, command);
     clearTimeout(editTimer.current);
-    editTimer.current = setTimeout(() => drainEdits.current(), 60);
+    editTimer.current = setTimeout(() => drainEdits.current(), command.type === "set_parameters" ? 0 : 60);
   };
   const edit = (command: EditCommand) =>
     run(async () => {

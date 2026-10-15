@@ -89,7 +89,8 @@ type plannedTraversal struct {
 }
 
 // Transport serializes commands, adapter acknowledgements and snapshots. It
-// plans at most two traversals ahead. Hosts pump Poll on a control worker and
+// plans at most two traversals ahead, plus one continuous edit prefix awaiting
+// presentation. Hosts pump Poll on a control worker and
 // render snapshots; neither UI timers nor audio callbacks decide loop policy.
 // Clock is deliberately absent: only acknowledged consumption advances position.
 type Transport struct {
@@ -301,7 +302,11 @@ func (t *Transport) plan(ctx context.Context, start int64, eligible bool) error 
 	return nil
 }
 func (t *Transport) fill(ctx context.Context, eligible bool) error {
-	for len(t.plans) < 2 {
+	limit := 2
+	if len(t.plans) > 0 && t.plans[0].schedule.ParameterPrefix {
+		limit = 3
+	}
+	for len(t.plans) < limit {
 		before := len(t.plans)
 		if before == 0 {
 			if t.resumeCue != nil {
@@ -376,7 +381,7 @@ func (t *Transport) acknowledge(acks []OutputAcknowledgement) error {
 		if err != nil {
 			return t.fail(err)
 		}
-		if s.Audio() {
+		if s.Audio() && !s.ParameterPrefix {
 			t.snapshot.Config.Speed = s.Speed
 		}
 		t.snapshot.ConsumedOutputFrame = a.ConsumedOutputFrame
@@ -422,7 +427,7 @@ func (t *Transport) acknowledge(acks []OutputAcknowledgement) error {
 		}
 	}
 	if len(t.plans) > 0 {
-		if t.plans[0].schedule.Audio() {
+		if t.plans[0].schedule.Audio() && !t.plans[0].schedule.ParameterPrefix {
 			t.snapshot.Config.Speed = t.plans[0].schedule.Speed
 		} else if t.planRun != nil && t.planRun.Snapshot().State == "running" {
 			t.snapshot.Config.Speed = t.planRun.Snapshot().Speed
@@ -464,7 +469,7 @@ func (t *Transport) Poll(ctx context.Context) (TransportSnapshot, error) {
 		t.snapshot.State = "stopped"
 		return t.currentSnapshot(), nil
 	}
-	if len(t.plans) > 0 && t.plans[0].schedule.Audio() {
+	if len(t.plans) > 0 && t.plans[0].schedule.Audio() && !t.plans[0].schedule.ParameterPrefix {
 		t.snapshot.Config.Speed = t.plans[0].schedule.Speed
 	}
 	err = t.fill(ctx, true)
@@ -574,6 +579,16 @@ func (t *Transport) Dispatch(ctx context.Context, c TransportCommand) (Transport
 		return reject("completed plan requires restart or clear_plan")
 	}
 	wasPlaying := t.snapshot.State == "playing"
+	if wasPlaying && c.Type == "set_parameters" {
+		applied, err := t.configureParameters(ctx, next, c.Speed != nil)
+		if err != nil {
+			return t.currentSnapshot(), err
+		}
+		if applied {
+			t.snapshot.Sequence = c.Sequence
+			return t.currentSnapshot(), nil
+		}
+	}
 	if wasPlaying {
 		if err := t.suspend(ctx); err != nil {
 			return t.currentSnapshot(), err

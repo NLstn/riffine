@@ -1,0 +1,69 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Live parameter profile</title>
+<button id="run">Profile playback edits</button>
+<pre id="result">Ready. Uses the real Go/WASM, DSP and Web Audio output.</pre>
+<script type="module">
+import {BrowserPractice} from './src/practice.ts';
+const {LiveOutputHost} = await import(/* @vite-ignore */ new URL('/practice/live-output-host.mjs',location.origin).href);
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const result = document.querySelector('#result');
+document.querySelector('#run').onclick = async () => {
+ document.querySelector('#run').disabled = true;
+ let client, host, analyser, resets = 0, suspends = 0;
+ try {
+  class ProfileHost extends LiveOutputHost {
+   constructor(...args) { super(...args); host = this; }
+   async reset(...args) {
+    resets++; const value=await super.reset(...args);
+    if(!analyser){analyser=this.context.createAnalyser();analyser.fftSize=2048;analyser.smoothingTimeConstant=0;}
+    this.node.connect(analyser);return value;
+   }
+   async suspend(...args) { if (this.presentedState === 0) suspends++; return super.suspend(...args); }
+  }
+  client = new BrowserPractice({loadLive:async()=>({LiveOutputHost:ProfileHost})});
+  const format = new URLSearchParams(location.search).get('format') || 'wav';
+  const source = new File([await (await fetch(`/practice/demo.${format}`)).blob()], `demo.${format}`);
+  let response = await client.open(source), snapshot = response.snapshot;
+  const check = value => { if(value.error)throw new Error(value.error.message); return value.snapshot; };
+  const duration=snapshot.project.track.audio.frames/snapshot.project.track.audio.sampleRate;
+  snapshot = check(await client.command(snapshot,{type:'set_loop',loop:{enabled:true,start:0,end:Math.min(2.8,duration)}}));
+  snapshot = check(await client.transport(snapshot,{type:'play'}));
+  const measurements = [];
+  const bins=new Float32Array(analyser.frequencyBinCount),samples=new Float32Array(analyser.fftSize);
+  const uiDelay=Number(new URLSearchParams(location.search).get('uiDelay')||0);
+  const detectPitch=async pitch=>{
+   const target=440*Math.pow(2,pitch/12),start=performance.now();let quietMs=0,last=start;
+   for(;;){
+    analyser.getFloatFrequencyData(bins);analyser.getFloatTimeDomainData(samples);
+    let best=0;for(let b=1;b<bins.length;b++)if(bins[b]>bins[best])best=b;
+    const now=performance.now(),frequency=best*host.context.sampleRate/analyser.fftSize;
+    if(samples.reduce((s,x)=>s+x*x,0)/samples.length<.00001)quietMs+=now-last;
+    last=now;
+    if(Math.abs(frequency-target)<25 && bins[best]>-50)return {observedPitchMs:now-start,quietMs};
+    if(now-start>3000)throw new Error(`Pitch did not reach ${target} Hz (observed ${frequency} Hz)`);
+    await delay(4);
+   }
+  };
+  for (let i=0;i<12;i++) {
+   await delay(250);
+   snapshot = check(await client.pollTransport());
+   const beforeResets=resets, beforeSuspends=suspends, generation=snapshot.transport.generation;
+   const start=performance.now();
+   const pitch=i%2 ? 0 : 3;
+   const observed=detectPitch(pitch).then(value=>({value}),error=>({error}));
+   await delay(uiDelay);
+   const commandStart=performance.now();
+   snapshot = check(await client.command(snapshot,{type:'set_parameters',speed:i%2 ? 1 : .75,pitch}));
+   const commandMs=performance.now()-commandStart;
+   const observation=await observed;if(observation.error)throw observation.error;const signal=observation.value;
+   measurements.push({commandMs,...signal,resets:resets-beforeResets,suspends:suspends-beforeSuspends,generationChanged:snapshot.transport.generation!==generation,underrunFrames:host.writer.snapshot().underrunFrames});
+   result.textContent=JSON.stringify({format,progress:measurements.length,measurements},null,2);
+  }
+  const sorted=measurements.map(x=>x.commandMs).sort((a,b)=>a-b);
+  const pitchTimes=measurements.map(x=>x.observedPitchMs).sort((a,b)=>a-b);
+  result.textContent=JSON.stringify({format,uiDelay,browser:navigator.userAgent,sampleRate:host.context.sampleRate,baseLatency:host.context.baseLatency,outputLatency:host.context.outputLatency,medianCommandMs:(sorted[5]+sorted[6])/2,p95CommandMs:sorted[11],medianObservedPitchMs:(pitchTimes[5]+pitchTimes[6])/2,p95ObservedPitchMs:pitchTimes[11],totalQuietMs:measurements.reduce((s,x)=>s+x.quietMs,0),totalResets:measurements.reduce((s,x)=>s+x.resets,0),totalSuspends:measurements.reduce((s,x)=>s+x.suspends,0),measurements},null,2);
+ } catch(error) { result.textContent=String(error.stack || error); }
+ finally { client?.dispose(); document.querySelector('#run').disabled=false; }
+};
+</script>

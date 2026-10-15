@@ -22,6 +22,8 @@ type Schedule struct {
 	StartFrame, EndFrame   int64
 	OutputStart, OutputEnd int64
 	Speed, Pitch           float64
+	// A continuous edit's presentation prefix does not consume a lookahead slot.
+	ParameterPrefix bool
 	// EdgeFadeFrames requests independent linear gain ramps at both ends.
 	// The adapter does not overlap, shorten, or expand the source selection.
 	EdgeFadeFrames  int64
@@ -52,6 +54,20 @@ type OutputDevice interface {
 // as plain loops. These methods run on a control worker, never an audio callback.
 type CueDevice interface{ SupportsCues() bool }
 type MetronomeDevice interface{ SupportsMetronome() bool }
+
+// ParameterDevice optionally updates an active audio cursor without stopping
+// output. The adapter reports the DSP's future audible boundary, not decode-ahead
+// as presentation. Already-presented acknowledgements precede the change. A
+// declined update must leave schedules/PCM intact; errors must quiesce output.
+type ParameterDevice interface {
+	ConfigureParameters(context.Context, uint64, float64, float64) (ParameterChange, error)
+}
+type ParameterChange struct {
+	Applied                             bool
+	Sequence                            uint64
+	SourceFrame, OutputFrame, OutputEnd int64
+	Acknowledgements                    []OutputAcknowledgement
+}
 
 func (s Schedule) Audio() bool { return s.Phase == "" }
 func (s Schedule) ClickWindow(ctx context.Context, start, end int64) ([]timing.Click, error) {

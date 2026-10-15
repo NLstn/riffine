@@ -9,6 +9,7 @@ const beatMode=process.env.RIFFINE_LIVE_BEATS === '1';
 const cueMode=process.env.RIFFINE_LIVE_CUES === '1'||beatMode;
 const planMode=process.env.RIFFINE_LIVE_PLAN === '1'||cueMode;
 const actionMode=process.env.RIFFINE_LIVE_ACTIONS === '1';
+const parameterMode=process.env.RIFFINE_LIVE_PARAMETERS === '1';
 const speed=Number(process.env.RIFFINE_LIVE_SPEED ?? '.75');
 const pitch=Number(process.env.RIFFINE_LIVE_PITCH ?? '3');
 let Processor;
@@ -74,7 +75,27 @@ try {
  await ready;
  let response=requireResponse(await call({type:'import',source:'source',document:'project'}));
  assert.equal(response.snapshot.capabilities.liveTransport,false);
- if (actionMode) {
+ if(parameterMode){
+  await command({type:'set_loop',loop:{enabled:true,start:0,end:response.snapshot.project.track.audio.frames/48000}});
+  response=requireResponse(await call({type:'attach_transport'}));sequence=response.snapshot.sequence;
+  let snapshot=await command({type:'play'});pumping=true;
+  await delay(100);
+  const generation=snapshot.transport.generation,node=host.node,measurements=[];
+  for(let i=0;i<12;i++){
+   await delay(Number(process.env.RIFFINE_PARAMETER_DELAY??0));
+   const started=performance.now();
+   snapshot=await command({type:'set_parameters',speed:[.37,1.3,.83,2,.25,1][i%6],pitch:i%2?3:-2});
+   measurements.push(performance.now()-started);
+   assert.equal(snapshot.state,'playing');assert.equal(snapshot.transport.generation,generation);assert.equal(host.node,node);
+   assert.equal(host.writer.snapshot().underrunFrames,0);
+  }
+  snapshot=await command({type:'pause'});assert.equal(snapshot.state,'paused');
+  assert.equal(snapshot.project.settings.speed,1);assert.equal(snapshot.project.settings.pitch,3);
+  await command({type:'play'});snapshot=await loops(snapshot.transport.completedLoops+1);
+  assert.equal(snapshot.transport.config.speed,1);assert.equal(snapshot.transport.completedLoops>0,true);
+  response=requireResponse(await call({type:'detach_transport'}));sequence=response.snapshot.sequence;
+  console.log(JSON.stringify({actualGoLiveFactory:true,actualCPPWASM:true,rapidParameterUpdates:measurements.length,preservesGenerationAndWorklet:true,noUnderruns:true,pausedAndResumedWithLatestParameters:true,completedLoops:snapshot.transport.completedLoops,deviceClockIsSynthetic:true},null,2));
+ } else if (actionMode) {
   await command({type:'set_annotations',annotations:{notes:'Keep notes',regions:[{id:'one',label:'One',start:.25,end:.75},{id:'two',label:'Two',start:.1,end:.2}]}});
   response=requireResponse(await call({type:'attach_transport'}));sequence=response.snapshot.sequence;
   let snapshot=await command({type:'speed_up'});assert.equal(snapshot.project.settings.speed,1.05);
@@ -191,9 +212,11 @@ try {
  pumping=true;
  snapshot=await loops(2);assert.equal(snapshot.transport.completedLoops,2);
  const previousGeneration=snapshot.transport.generation;
+ const previousNode=host.node;
  snapshot=await command({type:'set_parameters',speed:.6,pitch:5});
  assert.equal(snapshot.state,'playing');assert.equal(snapshot.project.settings.speed,.6);assert.equal(snapshot.project.settings.pitch,5);
- assert(snapshot.transport.generation>previousGeneration);
+ assert.equal(snapshot.transport.generation,previousGeneration);
+ assert.equal(host.node,previousNode);
  snapshot=await loops(snapshot.transport.completedLoops+1);
  snapshot=await command({type:'set_parameters',speed,pitch});
  assert.equal(snapshot.state,'playing');snapshot=await loops(snapshot.transport.completedLoops+1);
@@ -242,6 +265,6 @@ try {
  assert.equal(response.error.code,'cancelled');assert.equal(response.snapshot.sequence,sequence);assert.equal(response.snapshot.capabilities.liveTransport,false);assert.equal(context.closes,1);
  response=requireResponse(await call({type:'attach_transport'}));sequence=response.snapshot.sequence;
  response=requireResponse(await call({type:'detach_transport'}));sequence=response.snapshot.sequence;assert.equal(context.closes,1);
- console.log(JSON.stringify({actualGoLiveFactory:true,actualCPPWASM:true,presentedLoops:pausedLoops,noQueuedFrameCompletion:true,pausedSourceFrame:pausedFrame,pausePreservesPosition:true,seekResumePartialTraversalNotCounted:true,stoppedResetsCounters:true,detachedClosesContext:true,successfulSequence:sequence,maximumFileRead:maxRead,deviceClockIsSynthetic:true,speed,pitch,clockFailureQuiescesBeforeGoError:true,freshAttachmentRecoversPlayback:true,cancelOpeningAwaitsSourceAndDeviceFence:true,liveParameterChangesResetGenerationAndContinue:true},null,2));
+ console.log(JSON.stringify({actualGoLiveFactory:true,actualCPPWASM:true,presentedLoops:pausedLoops,noQueuedFrameCompletion:true,pausedSourceFrame:pausedFrame,pausePreservesPosition:true,seekResumePartialTraversalNotCounted:true,stoppedResetsCounters:true,detachedClosesContext:true,successfulSequence:sequence,maximumFileRead:maxRead,deviceClockIsSynthetic:true,speed,pitch,clockFailureQuiescesBeforeGoError:true,freshAttachmentRecoversPlayback:true,cancelOpeningAwaitsSourceAndDeviceFence:true,liveParameterChangesPreserveGenerationAndWorklet:true},null,2));
  }
 } finally {clearInterval(pump);clearTimeout(timeout);await host?.close();await worker.terminate();}

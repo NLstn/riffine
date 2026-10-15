@@ -16,7 +16,7 @@ export class ScheduleAcknowledgements {
  accept(schedule) {
   const sequence = identifier(schedule?.sequence);
   if (schedule.generation !== this.generation || sequence <= this.lastSequence || !frame(schedule.outputStart) || !frame(schedule.outputEnd) || schedule.outputStart !== this.outputEnd || schedule.outputEnd <= schedule.outputStart) throw new Error('Invalid ordered output schedule.');
-  if (this.entries.length >= 2) throw new Error('Output schedule queue is full.');
+  if (this.entries.length >= (this.entries[0]?.parameterPrefix ? 3 : 2)) throw new Error('Output schedule queue is full.');
   // Copy fields: caller cannot mutate an accepted schedule or acknowledgement.
   this.entries.push({ generation: schedule.generation, sequence: schedule.sequence, outputStart: schedule.outputStart, outputEnd: schedule.outputEnd, acknowledged: schedule.outputStart });
   this.lastSequence = sequence; this.outputEnd = schedule.outputEnd;
@@ -35,5 +35,13 @@ export class ScheduleAcknowledgements {
    this.entries.shift();
   }
   return result;
+ }
+ replaceTail(sequence, outputFrame, replacement) {
+  const current=this.entries[0];
+  if(!current || current.sequence!==sequence || !frame(outputFrame) || outputFrame<=current.acknowledged || outputFrame>=current.outputEnd || replacement.generation!==this.generation || replacement.outputStart!==outputFrame || !frame(replacement.outputEnd) || replacement.outputEnd<=outputFrame || identifier(replacement.sequence)<=this.lastSequence) throw new Error('Invalid live parameter boundary.');
+  // Undelivered output after this boundary belongs to the new parameters. The
+  // prefix keeps its ID so acknowledgements already observed remain ordered.
+  current.outputEnd=outputFrame;current.parameterPrefix=true;this.entries=[current];this.outputEnd=outputFrame;
+  this.accept(replacement);
  }
 }

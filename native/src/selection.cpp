@@ -12,7 +12,7 @@ struct riffine_selection {
  riffine_stream_limits limits{};
  uint64_t sourceFrames=0,remaining=0,expected=0,emitted=0,discard=0,fade=0;
  uint32_t channels=0,rate=0,pending=0,offset=0,rawCapacity=0;
- bool flushed=false,failed=false;
+ bool flushed=false,failed=false,configured=false;
  std::vector<float> raw;
  ~riffine_selection() {riffine_stream_destroy(stream);}
 };
@@ -57,6 +57,23 @@ int riffine_selection_set_edge_fade_frames(riffine_selection *s,uint64_t frames,
 int riffine_selection_info_get(const riffine_selection *s,riffine_selection_info *info,char *error,size_t size) {
  return boundary(error,size,[&] {require(s && info,"selection and info are required");*info={s->channels,s->rate,s->expected,s->sourceFrames-s->remaining};});
 }
+int riffine_selection_configure(riffine_selection *s,double speed,double pitch,riffine_selection_change *change,char *error,size_t size) {
+ if(error&&size)error[0]=0;
+ if(!s||!change||s->failed||!std::isfinite(speed)||speed<.25||speed>2||!std::isfinite(pitch)||pitch<-12||pitch>12)
+  return boundary(error,size,[&]{require(false,"invalid live selection parameters");});
+ if(s->flushed||s->discard||!s->emitted||!s->remaining||s->offset!=s->pending||s->sourceFrames-s->remaining<=s->limits.input_latency_frames) return 2;
+ return boundary(error,size,[&]{
+  // The synthesis buffer already holds outputLatency() old-parameter frames.
+  // Input latency is in source frames; do not reinterpret buffered source as
+  // already heard when changing speed. Both anchors survive repeated updates.
+  auto source=s->sourceFrames-s->remaining-s->limits.input_latency_frames;
+  auto output=s->emitted+s->limits.output_latency_frames;
+  auto expected=output+uint64_t(std::llround(double(s->sourceFrames-source)/speed));
+  require(expected>output&&expected<=(uint64_t(1)<<50),"live output timeline exceeds bound");
+  char text[512];dsp(riffine_stream_configure(s->stream,speed,pitch,text,sizeof(text)),text);
+  s->expected=expected;s->configured=true;*change={output,source,expected};
+ });
+}
 int riffine_selection_push(riffine_selection *s,const float *input,uint32_t frames,char *error,size_t size) {
  return boundary(error,size,[&] {
   require(s && input && !s->failed,"selection and input must be usable");
@@ -92,7 +109,7 @@ int riffine_selection_read(riffine_selection *s,float *output,uint32_t capacity,
     dsp(riffine_stream_flush(s->stream,s->raw.data(),s->rawCapacity,&s->pending,text,sizeof(text)),text);
     s->flushed=true;s->offset=0;
    } else {
-    require(s->expected-s->emitted<=1,"selection DSP tail is incomplete");
+    require(s->expected-s->emitted<=(s->configured ? 2u : 1u),"selection DSP tail is incomplete");
     for(uint32_t c=0;c<s->channels;++c) output[size_t(written)*s->channels+c]=0;
     ++written;++s->emitted;
    }

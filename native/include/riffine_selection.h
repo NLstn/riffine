@@ -6,7 +6,8 @@
 extern "C" {
 #endif
 /* Single-range processing worker ABI v1. No files, devices, Go or product policy.
- * Fixed speed/pitch; source and output share the sample rate. The host feeds
+ * Fixed speed/pitch by default; configure opts into live worker updates.
+ * Source and output share the sample rate. The host feeds
  * exactly source_frames decoded frames in order. Buffers are borrowed and calls
  * serialized, never realtime. PCM is interleaved finite float32, mono/stereo.
  * Processing trims exposed DSP latency, returns round(source_frames/speed)
@@ -26,6 +27,16 @@ int riffine_selection_create(uint32_t channels, uint32_t sample_rate,
  * No allocation; caller supplies the shared transport schedule's exact value. */
 int riffine_selection_set_edge_fade_frames(riffine_selection *, uint64_t frames, char *, size_t);
 int riffine_selection_info_get(const riffine_selection *, riffine_selection_info *, char *, size_t);
+/* Live worker update at a drained needs_input boundary. Preserves DSP history.
+ * Existing synthesis latency keeps the old parameters until output_frame;
+ * source_frame is the corresponding source position. Coordinates are relative
+ * to this selection. Returns 2 (unchanged) when too early/late or not drained,
+ * 1 on invalid parameters/error, 0 when applied. No allocation. */
+typedef struct riffine_selection_change {
+ uint64_t output_frame, source_frame, output_frames;
+} riffine_selection_change;
+int riffine_selection_configure(riffine_selection *, double speed, double semitones,
+ riffine_selection_change *, char *, size_t);
 /* Feed 1..512 whole frames only when read reports needs_input. Reject invalid
  * samples/ranges before processing. Never retains the host input buffer. */
 int riffine_selection_push(riffine_selection *, const float *input, uint32_t frames, char *, size_t);

@@ -62,6 +62,15 @@ export class Selection {
   this.module.HEAPF32.set(input, this.input / 4);
   this.check(this.module[`${this.api}_push`](this.handle, this.input, input.length / this.channels, this.error, 512));
  }
+ configure(speed,pitch) {
+  this.usable();
+  if(this.rateConverted || typeof this.module._riffine_selection_configure!=='function')return undefined;
+  const status=this.module._riffine_selection_configure(this.handle,speed,pitch,this.infoBuffer,this.error,512);
+  if(status===2)return undefined;
+  this.check(status);
+  const view=this.view(),p=this.infoBuffer;
+  return {outputFrame:Number(view.getBigUint64(p,true)),sourceFrame:Number(view.getBigUint64(p+8,true)),outputFrames:Number(view.getBigUint64(p+16,true))};
+ }
  read(capacity = 8192) {
   this.usable();
   if (!Number.isInteger(capacity) || capacity < 1 || capacity > 8192) throw new Error('Output capacity must be 1–8192 frames.');

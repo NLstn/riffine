@@ -28,6 +28,18 @@ writer.publish(Number.MAX_SAFE_INTEGER, PresentedState.quiescent); assert.deepEq
 assert.throws(() => writer.publish(Number.MAX_SAFE_INTEGER + 1)); assert.throws(() => writer.publish(1));
 new Int32Array(shared)[1] |= 1; assert.throws(() => reader.snapshot(), PresentedBusyError);
 const routingEvidence = { boundedSchedules: 2, orderedPartialAndCompleteAcknowledgements: true, boundedDrainPreservesUndeliveredEntries: true, duplicatePresentationAddsNoAck: true, staleGenerationRejected: true, exactUint64Identifiers: true, safeDeviceFrameCounter: true, physicalClockEvidence: false };
+// A live prefix keeps its old ID, drops stale lookahead and leaves two traversal
+// slots. Presented prefixes may never be rewritten by a subsequent edit.
+const edited=new ScheduleAcknowledgements();edited.reset('1');
+edited.accept({generation:'1',sequence:'1',outputStart:0,outputEnd:1000});
+edited.accept({generation:'1',sequence:'2',outputStart:1000,outputEnd:2000});
+edited.drain(100,128);
+assert.throws(()=>edited.replaceTail('1',100,{generation:'1',sequence:'3',outputStart:100,outputEnd:2000}));
+assert.throws(()=>edited.replaceTail('1',400,{generation:'2',sequence:'3',outputStart:400,outputEnd:2000}));
+edited.replaceTail('1',400,{generation:'1',sequence:'3',outputStart:400,outputEnd:1600});
+edited.accept({generation:'1',sequence:'4',outputStart:1600,outputEnd:3200});
+assert.throws(()=>edited.accept({generation:'1',sequence:'5',outputStart:3200,outputEnd:4000}),/full/);
+assert.deepEqual(edited.drain(1700,128),[{generation:'1',sequence:'1',consumedOutputFrame:400},{generation:'1',sequence:'3',consumedOutputFrame:1600},{generation:'1',sequence:'4',consumedOutputFrame:1700}]);
 
 // Production C++ selection WASM, scheduler, worklet copying and presentation
 // mapping. This is a Node platform pump with synthetic device timestamps.
