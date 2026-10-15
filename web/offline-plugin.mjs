@@ -4,10 +4,14 @@ import { createHash } from 'node:crypto';
 
 // A complete, versioned production shell. No user files or document requests.
 export default function offlinePlugin() {
- let output;
+ let output, base;
  return {
   name:'riffine-offline-shell', apply:'build',
-  configResolved(config) { output = resolve(config.root, config.build.outDir); },
+  configResolved(config) {
+   output = resolve(config.root, config.build.outDir);
+   base = config.base;
+   if (!base.startsWith('/') || !base.endsWith('/')) throw new Error('Offline practice requires an absolute base path ending in /.');
+  },
   async closeBundle() {
    const files = [];
    async function visit(directory) {
@@ -26,9 +30,9 @@ export default function offlinePlugin() {
    const hash = createHash('sha256');
    for (const file of files) { hash.update(file); hash.update(await readFile(resolve(output,file))); }
    const template = await readFile(new URL('./offline-sw-template.js',import.meta.url),'utf8');
-   hash.update(template);
+   hash.update(template); hash.update(base);
    const version = hash.digest('hex').slice(0,20);
-   await writeFile(resolve(output,'offline-sw.js'), `const VERSION = ${JSON.stringify(version)};\nconst ASSETS = ${JSON.stringify(files.map(file => '/'+file))};\n${template}`);
+   await writeFile(resolve(output,'offline-sw.js'), `const VERSION = ${JSON.stringify(version)};\nconst BASE = ${JSON.stringify(base)};\nconst ASSETS = ${JSON.stringify(files.map(file => base+file))};\n${template}`);
   },
  };
 }

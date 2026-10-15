@@ -1,3 +1,5 @@
+import { appPath } from './app-url.ts';
+
 // Presentation-facing types mirror versioned shared-core schemas. Product
 // validation, source units, sequencing decisions and persistence stay in Go.
 export interface Peak { min: number; max: number }
@@ -83,17 +85,17 @@ export class BrowserPractice implements PracticeFacade {
   if (this.disposed) throw this.shutdownError ?? new Error('Practice workspace closed.');
  }
  constructor(options: { loadOutput?: () => Promise<OutputQueueFactory>; loadLive?: BrowserPractice['loadLive'] } = {}) {
-  try { this.worker = new Worker('/practice/worker.js', { name: `client-${this.clientId}` }); }
+  try { this.worker = new Worker(appPath('practice/worker.js'), { name: `client-${this.clientId}` }); }
   catch (error) { this.log('worker creation failed', {}, error); throw error; }
-  this.log('worker starting', { workerURL: '/practice/worker.js', crossOriginIsolated: globalThis.crossOriginIsolated, previewSupported: this.previewSupported, liveSupported: this.liveSupported });
-  this.loadLive = options.loadLive ?? (() => import(/* @vite-ignore */ new URL('/practice/live-output-host.mjs', location.origin).href));
+  this.log('worker starting', { workerURL: appPath('practice/worker.js'), crossOriginIsolated: globalThis.crossOriginIsolated, previewSupported: this.previewSupported, liveSupported: this.liveSupported });
+  this.loadLive = options.loadLive ?? (() => import(/* @vite-ignore */ new URL(appPath('practice/live-output-host.mjs'), location.origin).href));
   this.loadOutput = options.loadOutput ?? (async () => {
-   const url = new URL('/practice/output-queue.mjs', location.origin).href;
+   const url = new URL(appPath('practice/output-queue.mjs'), location.origin).href;
    const [queue, timeline, monitor, boundary] = await Promise.all([
     import(/* @vite-ignore */ url),
-    import(/* @vite-ignore */ new URL('/practice/presentation-timeline.mjs', location.origin).href),
-    import(/* @vite-ignore */ new URL('/practice/presentation-monitor.mjs', location.origin).href),
-    import(/* @vite-ignore */ new URL('/practice/output-boundary.mjs', location.origin).href),
+    import(/* @vite-ignore */ new URL(appPath('practice/presentation-timeline.mjs'), location.origin).href),
+    import(/* @vite-ignore */ new URL(appPath('practice/presentation-monitor.mjs'), location.origin).href),
+    import(/* @vite-ignore */ new URL(appPath('practice/output-boundary.mjs'), location.origin).href),
    ]);
    return { ...queue, ...timeline, ...monitor, ...boundary } as OutputQueueFactory;
   });
@@ -205,7 +207,7 @@ export class BrowserPractice implements PracticeFacade {
    try {
     if (context.sampleRate !== snapshot.project.track.audio.sampleRate) throw new Error('This device does not support the original live sample rate.');
     const module = await Promise.race([this.loadLive(),cancelled]);
-    await Promise.race([context.audioWorklet.addModule('/practice/output-worklet.mjs'),cancelled]);
+    await Promise.race([context.audioWorklet.addModule(appPath('practice/output-worklet.mjs')),cancelled]);
     await Promise.race([Promise.all([resumed,beforeInstall]),cancelled]);
     this.ensureOpen();
     this.audio = context;
@@ -265,7 +267,7 @@ export class BrowserPractice implements PracticeFacade {
    const queueModule = await Promise.race([this.loadOutput(), cancelled]);
    const queue = queueModule.createOutputQueue(info.channels);
    const timeline = typeof context.getOutputTimestamp === 'function' && queueModule.PresentationMonitor ? queueModule.createPresentationTimeline?.() : undefined;
-   await Promise.race([context.audioWorklet.addModule('/practice/output-worklet.mjs'), cancelled]);
+   await Promise.race([context.audioWorklet.addModule(appPath('practice/output-worklet.mjs')), cancelled]);
    node = new AudioWorkletNode(context, 'riffine-output', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [info.channels], processorOptions: { queue, timeline } });
    node.onprocessorerror = () => this.cancel();
    node.connect(context.destination);
