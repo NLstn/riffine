@@ -65,7 +65,7 @@ func main() {
 				if browser.LiveAvailable() {
 					service.LiveDevice = browser.LiveFactory{}
 				}
-				current = binding.New(service)
+				current = binding.NewWithWaveformCache(service, browser.PeakCache{})
 			}
 			if current == nil {
 				fail(id, errors.New("select a source to open practice"))
