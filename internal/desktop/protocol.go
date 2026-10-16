@@ -49,8 +49,8 @@ func decodeEnvelope(line []byte) (Request, error) {
 	return q, nil
 }
 
-// Serve owns input and any closable output until EOF or cancellation. Exactly one operation may be in
-// flight. A cancel envelope targets that operation's ID and has no reply; the
+// Serve owns input and any closable output until EOF or cancellation. Exactly
+// one operation may be in flight. A cancel envelope targets that operation's ID and has no reply; the
 // operation still returns its final response before another operation starts.
 // EOF cancels and joins the worker, including any owned native audio process.
 func Serve(ctx context.Context, input io.ReadCloser, output io.Writer, handle Handler) error {
@@ -138,7 +138,11 @@ func Serve(ctx context.Context, input io.ReadCloser, output io.Writer, handle Ha
 			// the input loop, so the client's next request cannot race completion.
 			mu.Lock()
 			if lifetime.Err() == nil {
-				_, err := output.Write(append(data, '\n'))
+				line := append(data, '\n')
+				n, err := output.Write(line)
+				if err == nil && n != len(line) {
+					err = io.ErrShortWrite
+				}
 				if err != nil && lifetime.Err() == nil {
 					outputErr = err
 					cancel()

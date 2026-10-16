@@ -116,21 +116,22 @@ func TestEOFInterruptsBlockedReply(t *testing.T) {
 	input, send := io.Pipe()
 	output, receive := io.Pipe()
 	defer output.Close()
-	entered := make(chan struct{})
+	writing := make(chan struct{})
 	finished := make(chan error, 1)
 	go func() {
-		finished <- Serve(ctx, input, receive, func(context.Context, []byte) any {
-			close(entered)
+		finished <- Serve(ctx, input, &signalledWriter{receive, writing}, func(context.Context, []byte) any {
 			return strings.Repeat("x", 1<<20)
 		})
 	}()
 	io.WriteString(send, "{\"version\":1,\"id\":1,\"request\":{}}\n")
 	select {
-	case <-entered:
+	case <-writing:
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
 	// Deliberately never drain output, as when a GUI closes mid-response.
+	// Cancellation must not prevent the independent reader from noticing EOF.
+	io.WriteString(send, "{\"version\":1,\"id\":1,\"cancel\":true}\n")
 	send.Close()
 	select {
 	case err := <-finished:
@@ -140,4 +141,14 @@ func TestEOFInterruptsBlockedReply(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("EOF did not interrupt the blocked reply")
 	}
+}
+
+type signalledWriter struct {
+	io.WriteCloser
+	entered chan struct{}
+}
+
+func (w *signalledWriter) Write(data []byte) (int, error) {
+	close(w.entered)
+	return w.WriteCloser.Write(data)
 }

@@ -144,6 +144,7 @@ public sealed class CoreClient : IDisposable
     {
         try { if (process is { HasExited: false }) process.Kill(entireProcessTree: true); }
         catch (InvalidOperationException) { }
+        catch (System.ComponentModel.Win32Exception) { }
     }
 
     public void Dispose()
@@ -158,6 +159,7 @@ public sealed class CoreClient : IDisposable
             if (!process.WaitForExit(2000)) Terminate();
         }
         catch (InvalidOperationException) { }
-        process.Dispose();
+        catch (IOException) { Terminate(); }
+        finally { process.Dispose(); }
     }
 }
