@@ -40,7 +40,7 @@ jobs:
       - run: RIFFINE_SPIKE_OUT=build/host-spike/ios sh scripts/build-host-spike.sh ios
       - run: python3 -m unittest discover -s scripts -p 'test_check_ios_spike.py'
       - run: python3 scripts/check-ios-spike.py
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: ios-runtime-evidence
@@ -84,7 +84,7 @@ jobs:
           trap '"$ANDROID_HOME/platform-tools/adb" -s emulator-5554 emu kill >/dev/null 2>&1 || true' EXIT
           "$ANDROID_HOME/emulator/emulator" -avd riffine-ci -port 5554 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on >build/host-spike/android-amd64/emulator.log 2>&1 &
           python3 scripts/check-android-spike.py
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: android-runtime-evidence
@@ -147,7 +147,7 @@ jobs:
           RIFFINE_LIVE_SPEED=1 RIFFINE_LIVE_PITCH=0 node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-binding-normal.json
           RIFFINE_LIVE_SPEED=.25 RIFFINE_LIVE_PITCH=-12 node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-binding-min.json
           RIFFINE_LIVE_SPEED=2 RIFFINE_LIVE_PITCH=12 node scripts/check-browser-live-binding.mjs > build/browser-dsp/live-binding-max.json
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: cpp-wasm-streaming-evidence
