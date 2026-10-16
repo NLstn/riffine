@@ -9,7 +9,7 @@ New-Item -ItemType Directory -Force $smokeDirectory | Out-Null
 $install = Start-Process $setupPath -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /NOICONS /DIR=`"$installDirectory`" /LOG=`"$smokeDirectory/install.log`"" -Wait -PassThru
 if ($install.ExitCode -ne 0) { throw "Installer failed: $($install.ExitCode)" }
 try {
-    foreach ($name in @('Riffine.Windows.exe', 'riffine-desktop.exe', 'riffine-audio.exe', 'vcruntime140.dll', 'licenses')) {
+    foreach ($name in @('Riffine.Windows.exe', 'Riffine.Windows.pri', 'riffine-desktop.exe', 'riffine-audio.exe', 'vcruntime140.dll', 'licenses')) {
         if (-not (Test-Path (Join-Path $installDirectory $name))) { throw "Installed package is missing $name" }
     }
     # Verify the installed Go host, helper handshake and C# protocol together.

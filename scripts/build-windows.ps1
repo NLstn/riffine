@@ -18,6 +18,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Native build failed' }
     dotnet publish desktop/windows/Riffine.Windows.csproj -c Release -r win-x64 --self-contained true -p:Platform=x64 -p:RestoreLockedMode=true "-p:Version=$Version" -o $publish
     if ($LASTEXITCODE -ne 0) { throw 'WinUI publish failed' }
+    if (-not (Test-Path (Join-Path $publish 'Riffine.Windows.pri'))) { throw 'WinUI publish omitted the application resource index' }
     go build -trimpath '-ldflags=-H=windowsgui' -o (Join-Path $publish 'riffine-desktop.exe') ./cmd/riffine-desktop
     if ($LASTEXITCODE -ne 0) { throw 'Desktop core build failed' }
     cmake --install $nativeBuild --config Release --prefix (Join-Path $repository 'build/windows/native-package')
