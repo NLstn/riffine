@@ -101,6 +101,7 @@ export default function PracticeWorkspace({
   const [markerMeasure, setMarkerMeasure] = useState("1");
   const [markerBeat, setMarkerBeat] = useState("1");
   const [detailView, setDetailView] = useState(false);
+  const [zoomFactor, setZoomFactor] = useState("2");
   const install = (response: PracticeResponse, syncForms = false) => {
     if (response.snapshot) {
       const current = response.snapshot;
@@ -671,6 +672,30 @@ export default function PracticeWorkspace({
       );
       setDetailView(false);
     });
+  const customZoom = () =>
+    run(async () => {
+      if (!facade.current || !snapshot) return;
+      const factor = Number(zoomFactor);
+      if (!Number.isFinite(factor) || factor < 1 || factor > 100) return;
+      const trackFrames = snapshot.project.track.audio.frames;
+      const loopStart = Math.round(
+        Number(start) * snapshot.project.track.audio.sampleRate,
+      );
+      const loopEnd = Math.round(
+        Number(end) * snapshot.project.track.audio.sampleRate,
+      );
+      const center = (loopStart + loopEnd) / 2;
+      const span = Math.max(1, Math.round(trackFrames / factor));
+      const startFrame = Math.max(
+        0,
+        Math.min(trackFrames - span, Math.round(center - span / 2)),
+      );
+      install(
+        await facade.current.waveform(startFrame, startFrame + span),
+        false,
+      );
+      setDetailView(false);
+    });
   const preview = () =>
     run(async () => {
       if (!facade.current?.preview || !snapshot) return;
@@ -1003,6 +1028,32 @@ export default function PracticeWorkspace({
                 onClick={() => void zoom()}
               >
                 Zoom to loop
+              </button>
+              <label className="waveform-zoom-control">
+                Zoom
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  step="0.5"
+                  value={zoomFactor}
+                  aria-label="Custom waveform zoom factor around loop midpoint"
+                  disabled={controlsBusy || !snapshot}
+                  onChange={(event) => setZoomFactor(event.target.value)}
+                />
+                ×
+              </label>
+              <button
+                type="button"
+                disabled={
+                  controlsBusy ||
+                  !snapshot ||
+                  Number(zoomFactor) < 1 ||
+                  Number(zoomFactor) > 100
+                }
+                onClick={() => void customZoom()}
+              >
+                Apply
               </button>
             </div>
           </div>
