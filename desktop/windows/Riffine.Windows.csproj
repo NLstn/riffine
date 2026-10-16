@@ -20,4 +20,18 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260209005" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.7705" />
   </ItemGroup>
+  <!-- The unpackaged MRT Core build produces this index but does not include
+       it in dotnet publish. Without the app PRI, WinUI fails before startup.
+       See microsoft/WindowsAppSDK#6720. -->
+  <Target Name="PublishRiffineResourceIndex"
+          BeforeTargets="ComputeResolvedFilesToPublishList"
+          DependsOnTargets="_GenerateProjectPriFile">
+    <Error Condition="!Exists('$(ProjectPriFullPath)')" Text="The native app resource index was not generated." />
+    <ItemGroup>
+      <ResolvedFileToPublish Include="$(ProjectPriFullPath)">
+        <RelativePath>$(ProjectPriFileName)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
 </Project>
