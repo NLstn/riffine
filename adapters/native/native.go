@@ -52,6 +52,7 @@ func (a Adapter) run(ctx context.Context, args ...string) error {
 		return errors.New("native helper path is empty")
 	}
 	cmd := exec.CommandContext(ctx, a.Executable, args...)
+	configureHelper(cmd)
 	cmd.Stderr = a.Stderr
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {

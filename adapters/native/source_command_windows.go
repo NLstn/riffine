@@ -15,6 +15,9 @@ func inheritSource(cmd *exec.Cmd, file *os.File) (uint64, func(), error) {
 	if err = syscall.DuplicateHandle(process, syscall.Handle(file.Fd()), process, &duplicate, 0, true, syscall.DUPLICATE_SAME_ACCESS); err != nil {
 		return 0, nil, err
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{AdditionalInheritedHandles: []syscall.Handle{duplicate}}
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.AdditionalInheritedHandles = append(cmd.SysProcAttr.AdditionalInheritedHandles, duplicate)
 	return uint64(duplicate), func() { syscall.CloseHandle(duplicate) }, nil
 }

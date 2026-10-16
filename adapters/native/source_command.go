@@ -24,6 +24,7 @@ func (a Adapter) sourceCommand(ctx context.Context, r resource.Reader, operation
 		return nil, nil, errors.New("native compressed decoding requires a filesystem-owned resource")
 	}
 	cmd := exec.CommandContext(ctx, a.Executable)
+	configureHelper(cmd)
 	handle, release, err := inheritSource(cmd, file)
 	if err != nil {
 		return nil, nil, err
