@@ -28,7 +28,7 @@ they are being analyzed or previewed.
 ## Build on Windows
 
 Install .NET 10 SDK, Go 1.24+, CMake 3.24+, Git, and Visual Studio 2022 C++ build
-tools (Desktop development with C++ and a Windows SDK). Inno Setup 6 is needed
+tools or newer (Desktop development with C++ and a Windows SDK). Inno Setup 6 is needed
 only for the installer. Run from PowerShell 7:
 
 ```powershell
@@ -78,8 +78,9 @@ checks pass; the desktop host cross-compiles for Windows x64. The actual C#
 client-to-Go process check passes for handshake, Unicode-path import, editing,
 already-cancelled requests, failed replacement, waveform queries, exclusive save
 and reopening. All C# sources type-check against the restored WinUI references.
-The full app build stops at Microsoft's Windows-only XAML compiler on macOS;
-this is not a successful Windows application or installer build.
+The macOS app build stops at Microsoft's Windows-only XAML compiler. The first
+Windows CI run successfully compiled/published the complete WinUI client and
+native helper; installer and native-window acceptance are tracked separately.
 
 ## Outstanding acceptance
 

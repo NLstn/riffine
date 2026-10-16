@@ -9,6 +9,7 @@ try {
     $repository = (Get-Location).Path
     $publish = Join-Path $repository 'build/windows/publish'
     $nativeBuild = Join-Path $repository 'build/windows/native'
+    if (Test-Path $publish) { Remove-Item $publish -Recurse -Force }
     New-Item -ItemType Directory -Force $publish | Out-Null
     # Static CRT for our native helper; WinUI runtime CRT is bundled below.
     cmake -S native -B $nativeBuild -A x64 -DBUILD_TESTING=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
@@ -67,14 +68,18 @@ try {
     $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
     $vsInstall = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
     if (-not $vsInstall) { throw 'Visual Studio C++ redistributable files were not found' }
-    $redist = Get-ChildItem (Join-Path $vsInstall 'VC/Redist/MSVC') -Directory | Sort-Object Name -Descending | Select-Object -First 1
-    $crt = Get-ChildItem (Join-Path $redist.FullName 'x64/Microsoft.VC*.CRT') -Directory | Select-Object -First 1
+    # VS 2026 also adds v14x alias folders; do not assume every first-level
+    # folder contains an x64 CRT. Select the newest real release DLL instead.
+    $vcRuntime = Get-ChildItem (Join-Path $vsInstall 'VC/Redist/MSVC') -Filter vcruntime140.dll -File -Recurse |
+        Where-Object { $_.FullName -match '[\\/]x64[\\/]' -and $_.FullName -notmatch '[\\/](onecore|debug_nonredist|spectre)[\\/]' } |
+        Sort-Object { $_.VersionInfo.FileVersionRaw } -Descending | Select-Object -First 1
+    $crt = if ($vcRuntime) { $vcRuntime.Directory } else { $null }
     if (-not $crt) { throw 'x64 Visual C++ runtime files were not found' }
     Copy-Item (Join-Path $crt.FullName '*.dll') $publish
     @(
         "Application: Riffine $Version"
         "Windows App SDK: 1.8.260209005 (complete graph in NuGet package notices)"
-        "Visual C++ app-local CRT: $($redist.Name) / $($crt.Name)"
+        "Visual C++ app-local CRT: $($vcRuntime.VersionInfo.FileVersion) / $($crt.Name)"
         "Go: $(go version)"
         ".NET SDK: $(dotnet --version)"
         ".NET runtime: $runtimeVersion"
