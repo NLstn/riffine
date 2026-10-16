@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Called only after Windows installer acceptance. Main runs are serialized by
-# the workflow concurrency group so an older build cannot replace a newer one.
+# the workflow concurrency group; the ancestry check also protects old reruns.
 set -euo pipefail
 
 : "${GITHUB_REPOSITORY:?}"
@@ -33,6 +33,16 @@ notes="$RUNNER_TEMP/windows-release-notes.md"
 if [[ "$channel" == nightly ]]; then
   tag=windows-nightly
   title='Windows Nightly'
+  # Listing releases propagates API failures rather than treating them as a
+  # missing release. Only this rolling nightly tag is ever moved or clobbered.
+  release_id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[] | select(.tag_name == "windows-nightly") | .id')
+  if [[ -n "$release_id" ]]; then
+    comparison=$(gh api "repos/$GITHUB_REPOSITORY/compare/$tag...$GITHUB_SHA" --jq .status)
+    if [[ "$comparison" == behind ]]; then
+      echo 'A newer nightly is already published; keeping its downloads.'
+      exit 0
+    fi
+  fi
   # A stable asset name gives users a permanent download URL.
   mv "${installers[0]}" Riffine-nightly-windows-x64-setup.exe
   sha256sum Riffine-nightly-windows-x64-setup.exe > SHA256SUMS.txt
@@ -43,9 +53,6 @@ if [[ "$channel" == nightly ]]; then
     printf 'Build: [GitHub Actions](https://github.com/%s/actions/runs/%s)\n\n' "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
     cat "$repository_root/desktop/windows/release-notes.md"
   } > "$notes"
-  # Listing releases propagates API failures rather than treating them as a
-  # missing release. Only this rolling nightly tag is ever moved or clobbered.
-  release_id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[] | select(.tag_name == "windows-nightly") | .id')
   if [[ -n "$release_id" ]]; then
     gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag" -f sha="$GITHUB_SHA" -F force=true > /dev/null
     gh release upload "$tag" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
