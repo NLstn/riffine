@@ -48,6 +48,8 @@ int main(){
 #ifdef _WIN32
    // Borrowed-handle decoding must match path decoding and preserve ownership
    // and the caller's cursor, including after the source is renamed.
+   // The legacy path decoder's CRT file intentionally does not share deletes.
+   riffine_decoder_close(owner.s);owner.s=nullptr;
    auto handle=CreateFileW(input.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
    check(handle!=INVALID_HANDLE_VALUE,"cannot open borrowed fixture");
    struct HandleOwner{HANDLE h;~HandleOwner(){CloseHandle(h);}}handleOwner{handle};
