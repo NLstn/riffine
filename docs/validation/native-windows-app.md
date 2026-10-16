@@ -52,7 +52,8 @@ The first relevant merge creates this release. Download its
 [Windows x64 installer](https://github.com/NLstn/riffine/releases/download/windows-nightly/Riffine-nightly-windows-x64-setup.exe)
 or `SHA256SUMS.txt`; these URLs stay fixed across nightly updates. The release
 notes identify the exact source commit and acceptance run. A failed build leaves
-the last successful nightly available. "Nightly" means a build after every
+the last successful nightly available. Rerunning an older commit cannot replace
+a newer nightly. "Nightly" means a build after every
 relevant merge, rather than a scheduled daily build.
 
 Relevant changes include the Windows UI and bridge check, desktop Go host,
