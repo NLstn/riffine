@@ -22,7 +22,14 @@ try {
         $app.Kill($true)
         throw 'Native WinUI startup did not complete within 30 seconds'
     }
-    if ($app.ExitCode -ne 0 -or -not (Test-Path $report)) { throw "Native WinUI startup failed: $($app.ExitCode)" }
+    if ($app.ExitCode -ne 0 -or -not (Test-Path $report)) {
+        if (Test-Path "$report.error") { Get-Content "$report.error" | Write-Host }
+        Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = (Get-Date).AddMinutes(-2) } -ErrorAction SilentlyContinue |
+            Where-Object { $_.Message -match 'Riffine|Microsoft.UI.Xaml|CoreCLR' } |
+            Select-Object TimeCreated, ProviderName, Message | Format-List | Out-String |
+            Tee-Object -FilePath (Join-Path $smokeDirectory 'startup-events.txt') | Write-Host
+        throw "Native WinUI startup failed: $($app.ExitCode)"
+    }
     $loaded = Get-Content $report -Raw | ConvertFrom-Json
     if ($loaded.winui -ne 'loaded') { throw 'Native window did not report a completed load' }
 } finally {
