@@ -97,8 +97,13 @@ The first native Windows client uses WinUI 3 and C# with the shared Go core and
 C++ audio helper. It provides a local music list, waveform/phrase selection,
 speed/pitch settings, project saves and single-pass preview. Build on Windows
 with `./scripts/build-windows.ps1 -Installer`; the **Native Windows app** workflow
-also produces an installer download. Explicit `windows-vMAJOR.MINOR.PATCH` tags
-publish Windows prereleases on GitHub.
+publishes a rolling [Windows Nightly](https://github.com/NLstn/riffine/releases/tag/windows-nightly)
+after every relevant merge to `main`. Download the
+[Windows installer](https://github.com/NLstn/riffine/releases/download/windows-nightly/Riffine-nightly-windows-x64-setup.exe)
+from its release assets. Windows UI, shared engine/core and packaging changes
+trigger builds; macOS-only UI changes do not. PR/manual builds are available as
+Actions artifacts. Explicit `windows-vMAJOR.MINOR.PATCH` tags publish separate
+versioned Windows prereleases.
 
 Automated Windows build/install/startup/uninstall checks pass. This initial client
 still needs interactive Windows UI/hardware acceptance and native continuous

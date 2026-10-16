@@ -32,9 +32,12 @@ Target Windows 10 build 19041 or newer, x64 initially. Publish a self-contained
 DLLs and notices in one folder. Inno Setup creates a per-user `.exe` installer
 with Start menu/uninstall integration and an optional desktop shortcut.
 
-The Windows workflow builds installers for PRs and main and retains downloads as
-Actions artifacts. An explicit `windows-vMAJOR.MINOR.PATCH` tag creates a GitHub
-prerelease containing the installer and SHA-256 checksum. Unsigned alpha builds
+The Windows workflow builds installers for relevant PRs and main merges and
+retains downloads as Actions artifacts. Successful relevant main builds replace
+the rolling `windows-nightly` GitHub prerelease with a stable installer URL;
+macOS-only UI changes do not trigger it. An explicit `windows-vMAJOR.MINOR.PATCH`
+tag creates a separate versioned prerelease containing the installer and SHA-256
+checksum. Versioned assets are never overwritten. Unsigned alpha builds
 remain distinct from signed, supported releases under R6.
 
 ## Consequences

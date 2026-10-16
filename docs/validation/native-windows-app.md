@@ -43,13 +43,44 @@ users install the complete app through the setup program. Native helper
 processes run without opening console windows. No external browser or Node.js
 installation is required.
 
-The **Native Windows app** GitHub Actions workflow builds the same app and setup
-program on Windows. Main/PR/manual runs retain the setup in the
-`riffine-windows-x64-installer` artifact. Publish a Windows alpha by pushing an
-explicit `windows-v0.1.0` tag after automated installer acceptance passes;
-the tag workflow attaches the setup and `SHA256SUMS.txt` to a GitHub prerelease.
-The remaining manual and feature acceptance below gates a supported release.
-Builds are unsigned until a code-signing identity is configured.
+## GitHub downloads and release channels
+
+After a relevant merge to `main`, the **Native Windows app** workflow builds,
+installs, launches and uninstalls the app on a Windows runner. Only a successful
+run updates the rolling [Windows Nightly prerelease](https://github.com/NLstn/riffine/releases/tag/windows-nightly).
+The first relevant merge creates this release. Download its
+[Windows x64 installer](https://github.com/NLstn/riffine/releases/download/windows-nightly/Riffine-nightly-windows-x64-setup.exe)
+or `SHA256SUMS.txt`; these URLs stay fixed across nightly updates. The release
+notes identify the exact source commit and acceptance run. A failed build leaves
+the last successful nightly available. "Nightly" means a build after every
+relevant merge, rather than a scheduled daily build.
+
+Relevant changes include the Windows UI and bridge check, desktop Go host,
+shared core and desktop adapters, native engine (excluding its WASM-only build),
+Go dependencies, bundled notices/guide, and Windows build/publication scripts
+and workflow. Changes only to `desktop/macos/`, `web/`, mobile hosts or unrelated
+documentation do not trigger a Windows build. Shared engine/core changes do.
+Keep both event path lists in `.github/workflows/windows.yml` in sync when
+adding Windows dependencies. GitHub applies these path filters to branch and PR
+events; version tag pushes always build.
+
+PR and manual runs retain downloads in the workflow's
+`riffine-windows-x64-installer` artifact and never update a release. Manual runs
+can choose an installer version. To publish a versioned build later, tag the
+selected commit and push the explicit Windows tag:
+
+```sh
+git tag windows-v0.2.0 <commit>
+git push origin windows-v0.2.0
+```
+
+The tag workflow builds that commit and attaches `Riffine-0.2.0-windows-x64-setup.exe`
+and `SHA256SUMS.txt` to its own GitHub prerelease. Existing versioned downloads
+are never overwritten. Version tags use `windows-vMAJOR.MINOR.PATCH`; keep them
+separate from the moving `windows-nightly` tag. Versioned builds remain marked as
+prereleases during alpha; promote a selected release in GitHub when the remaining
+manual and supported-release acceptance gates pass. Builds are unsigned until a
+code-signing identity is configured.
 
 ## Protocol and evidence
 
