@@ -23,6 +23,7 @@ int main(){
   extensions.push_back("m4a");extensions.push_back("alac.m4a");
 #endif
   for(const char *extension:extensions){
+   std::cout<<"Checking "<<extension<<std::endl;
    auto input=root/fs::u8path(std::string("ギター.")+extension);
    fs::copy_file(fs::path(RIFFINE_DECODE_FIXTURES)/(std::string("generated-stereo.")+extension),input);
    auto text=input.u8string();char error[512];riffine_decoder *s=nullptr;

@@ -113,6 +113,12 @@ class WindowsM4A {
   ComPtr<IStream> stream;stream.Attach(new EncodedStream(resource));
   ComPtr<IMFByteStream> bytes;
   mediaCheck(MFCreateMFByteStreamOnStream(stream.Get(),&bytes),"Cannot read M4A resource");
+  // The resolver selects a container handler from a MIME type/name hint.
+  // This is a synthetic hint only; all reads still use the retained handle.
+  ComPtr<IMFAttributes> attributes;
+  mediaCheck(bytes.As(&attributes),"Cannot configure M4A stream type");
+  mediaCheck(attributes->SetString(MF_BYTESTREAM_CONTENT_TYPE,L"audio/mp4"),"Cannot identify M4A stream type");
+  mediaCheck(attributes->SetString(MF_BYTESTREAM_ORIGIN_NAME,L"riffine-source.m4a"),"Cannot identify M4A container");
   mediaCheck(MFCreateSourceReaderFromByteStream(bytes.Get(),nullptr,&reader),"Cannot open M4A");
   mediaCheck(reader->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS,FALSE),"Cannot select M4A audio");
   mediaCheck(reader->SetStreamSelection(MF_SOURCE_READER_FIRST_AUDIO_STREAM,TRUE),"M4A has no audio stream");
