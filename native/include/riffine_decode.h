@@ -9,7 +9,9 @@ extern "C" {
  * interleaved float32 buffers. Exact source-frame seeking; no callback use.
  * MP3 coordinates honor the pinned decoder's available delay/padding metadata.
  * MP3 seeks replay decoded frames from zero for deterministic reservoir state.
- * Source precision is zero for MP3/unknown; encoding: 1 WAV PCM, 2 FLAC, 3 MP3. */
+ * Source precision is zero for MP3/unknown; encoding: 1 WAV PCM, 2 FLAC, 3 MP3,
+ * 4 AAC, 5 ALAC. Windows M4A uses Media Foundation and replays from zero for
+ * exact seeks. Frame counts describe that host decoder's sequential output. */
 typedef struct riffine_decoder riffine_decoder;
 typedef struct riffine_decoder_info {
  uint32_t channels, sample_rate, source_bits, encoding;

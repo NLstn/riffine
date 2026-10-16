@@ -51,7 +51,7 @@ public sealed class MainWindow : Window
         {
             if (!await ConfirmChangesAsync()) return;
             var picker = new FileOpenPicker(AppWindow.Id);
-            foreach (var extension in new[] { ".wav", ".wave", ".flac", ".mp3" }) picker.FileTypeFilter.Add(extension);
+            foreach (var extension in MusicLibrary.Extensions) picker.FileTypeFilter.Add(extension);
             if (await picker.PickSingleFileAsync() is { } file) await ImportAsync(file.Path);
         });
         openFolder = Action("Choose music folder", ChooseFolderAsync);
@@ -321,25 +321,12 @@ public sealed class MainWindow : Window
         if (await picker.PickSingleFolderAsync() is not { } folder) return;
         await RunAsync(async token =>
         {
-            var found = await Task.Run(() =>
-            {
-                var result = new List<LibrarySong>();
-                var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint };
-                foreach (var path in Directory.EnumerateFiles(folder.Path, "*", options))
-                {
-                    token.ThrowIfCancellationRequested();
-                    if (Path.GetExtension(path).ToLowerInvariant() is not (".wav" or ".wave" or ".flac" or ".mp3")) continue;
-                    if (result.Count == 100000) throw new IOException("This library is too large. Choose a smaller music folder.");
-                    result.Add(new LibrarySong(path));
-                }
-                result.Sort((a, b) => StringComparer.CurrentCultureIgnoreCase.Compare(a.Title, b.Title));
-                return result;
-            }, token);
+            var found = await Task.Run(() => MusicLibrary.Scan(folder.Path, token), token);
             library.Clear();
-            library.AddRange(found);
+            library.AddRange(found.Songs);
             folderLabel.Text = Path.GetFileName(folder.Path);
             RenderLibrary();
-            status.Text = $"{found.Count} music files found. Choose a song to open it.";
+            status.Text = MusicLibrary.Status(found);
         }, "Reading music folder…");
     }
 

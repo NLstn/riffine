@@ -95,8 +95,9 @@ Alternatively set `RIFFINE_AUDIO_HELPER` to the full `riffine-audio` executable 
 
 The first native Windows client uses WinUI 3 and C# with the shared Go core and
 C++ audio helper. It provides a local music list, waveform/phrase selection,
-speed/pitch settings, project saves and single-pass preview. Build on Windows
-with `./scripts/build-windows.ps1 -Installer`; the **Native Windows app** workflow
+speed/pitch settings, project saves and single-pass preview. It supports WAV,
+MP3, FLAC and unprotected M4A (AAC/Apple Lossless). Build on Windows with
+`./scripts/build-windows.ps1 -Installer`; the **Native Windows app** workflow
 publishes a rolling [Windows Nightly](https://github.com/NLstn/riffine/releases/tag/windows-nightly)
 after every relevant merge to `main`. Download the
 [Windows installer](https://github.com/NLstn/riffine/releases/download/windows-nightly/Riffine-nightly-windows-x64-setup.exe)

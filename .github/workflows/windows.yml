@@ -93,6 +93,12 @@ jobs:
             $version = $env:GITHUB_REF_NAME -replace '^windows-v', ''
           }
           ./scripts/build-windows.ps1 -Version $version -Installer
+      - name: Check M4A decode, waveform, seeking, preview and render
+        shell: pwsh
+        run: |
+          $env:RIFFINE_AUDIO_HELPER = (Resolve-Path build/windows/publish/riffine-audio.exe).Path
+          go test ./adapters/native -run '^TestWindowsM4A$' -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install, launch native window and uninstall
         shell: pwsh
         run: |

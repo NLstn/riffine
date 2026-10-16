@@ -22,7 +22,14 @@ int run(int argc, char **argv) {
     if(argc==2 && std::string(argv[1])=="version") {std::puts("riffine-audio ABI 1; Signalsmith Stretch + miniaudio");return 0;}
     int result=1;
     auto operation = argc > 1 ? std::string(argv[1]) : std::string();
-    if(argc==2 && operation=="formats") { std::puts(R"({"abi":1,"formats":["wav-pcm","flac","mp3"],"borrowedSources":true,"borrowedPreview":true,"borrowedRender":true,"scheduledControl":2,"scheduledCues":1})"); return 0; }
+    if(argc==2 && operation=="formats") {
+#ifdef _WIN32
+      std::puts(R"({"abi":1,"formats":["wav-pcm","flac","mp3","aac","alac"],"borrowedSources":true,"borrowedPreview":true,"borrowedRender":true,"scheduledControl":2,"scheduledCues":1})");
+#else
+      std::puts(R"({"abi":1,"formats":["wav-pcm","flac","mp3"],"borrowedSources":true,"borrowedPreview":true,"borrowedRender":true,"scheduledControl":2,"scheduledCues":1})");
+#endif
+      return 0;
+    }
     if(argc==2 && operation=="device-info"){
       auto info=riffine::probeOutputBackend();
       std::printf(R"({"sampleRate":%u,"channels":%u,"bufferFrames":%u,"latencyFrames":%u})" "\n",info.sample_rate,info.channels,info.buffer_frames,info.latency_frames);return 0;
@@ -41,7 +48,7 @@ int run(int argc, char **argv) {
       struct Owner {riffine_decoder *value;~Owner(){riffine_decoder_close(value);}} owner{raw};
       riffine_decoder_info info{};
       if(riffine_decoder_info_get(raw,&info,error,sizeof(error))) throw std::runtime_error(error);
-      const char *encoding=info.encoding==1 ? "wav-pcm" : info.encoding==2 ? "flac" : "mp3";
+      const char *encoding=info.encoding==1 ? "wav-pcm" : info.encoding==2 ? "flac" : info.encoding==3 ? "mp3" : info.encoding==4 ? "aac" : "alac";
       if(operation=="decoder-info" || operation=="decoder-info-handle") {
         std::printf(R"({"encoding":"%s","sampleRate":%u,"channels":%u,"bits":%u,"frames":%llu})" "\n",encoding,info.sample_rate,info.channels,info.source_bits,(unsigned long long)info.frames);return 0;
       }

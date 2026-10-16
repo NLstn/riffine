@@ -6,7 +6,7 @@ build 19041 or later and Windows 11 on x64.
 
 ## Included
 
-- Native file/folder dialogs and a searchable recursive WAV/FLAC/MP3 file list.
+- Native file/folder dialogs and a searchable recursive WAV/FLAC/MP3/M4A file list.
   The list shows filenames; source format/identity is checked by Go on open.
   At most 500 matching rows are displayed; search covers the full bounded list.
 - Source waveform overview and zoom to the selected phrase, using the shared
@@ -20,10 +20,24 @@ build 19041 or later and Windows 11 on x64.
   control process and native-worker teardown on app close.
 - A self-contained app folder, per-user setup executable and SHA-256 checksum.
 
-Native format support currently covers PCM WAV, FLAC and MP3. Browser M4A/Opus
-support does not establish native decoder support. Projects keep source audio
+Native format support covers PCM WAV, FLAC, MP3 and unprotected M4A containing
+AAC or Apple Lossless (ALAC). M4A uses Windows Media Foundation; Windows N
+installations need Microsoft's Media Feature Pack. Other platforms keep their
+existing native format list. Folder scans explain which audio files were skipped
+and name the supported formats when no songs are found. Opus remains unsupported
+in the Windows client. Projects keep source audio
 references; they do not copy or upload music. Sources must remain stable while
 they are being analyzed or previewed.
+
+M4A decoding retains the verified original file handle, including across Unicode
+paths and renames. Decoded samples are buffered in bounded blocks. Opening counts
+sequential decoded frames to account for AAC padding/MP4 edits; exact seeks replay
+from the start, so opening and seeking long M4A tracks can take extra time.
+Frame coordinates describe Windows' decoder output and need not match another
+host's AAC padding convention. Source bit depth is unknown (zero) for this path.
+Windows builds check AAC/ALAC metadata, PCM, exact seeks, EOF and borrowed-handle
+ownership in C++; the Windows workflow checks Go waveform/preview/render and
+installed C# import/save/reopen using the generated M4A fixtures.
 
 ## Build on Windows
 
@@ -134,7 +148,7 @@ suite and `go vet` after rebuilding the helper.
 - Actual WASAPI preview/Stop and app-close behavior, including missing devices.
 - Native continuous transport with pause/seek, live changes, repeated loops,
   practice cues and device presentation acknowledgements.
-- Native M4A/Opus support, embedded tag/artwork parity, richer annotation controls,
+- Native Opus support, embedded tag/artwork parity, richer annotation controls,
   volume/mute and the remaining web/native product parity work.
 - Installer/application signing and the remaining R6 supported-release gates.
 

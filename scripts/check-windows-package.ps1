@@ -13,7 +13,7 @@ try {
         if (-not (Test-Path (Join-Path $installDirectory $name))) { throw "Installed package is missing $name" }
     }
     # Verify the installed Go host, helper handshake and C# protocol together.
-    dotnet (Join-Path $repository 'build/windows/bridge-check/Riffine.BridgeCheck.dll') $installDirectory
+    dotnet (Join-Path $repository 'build/windows/bridge-check/Riffine.BridgeCheck.dll') $installDirectory (Join-Path $repository 'native/testdata')
     if ($LASTEXITCODE -ne 0) { throw 'Installed C# / Go bridge check failed' }
     $report = Join-Path $smokeDirectory 'native-window.json'
     Remove-Item $report -ErrorAction SilentlyContinue

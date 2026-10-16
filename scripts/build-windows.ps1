@@ -12,10 +12,12 @@ try {
     if (Test-Path $publish) { Remove-Item $publish -Recurse -Force }
     New-Item -ItemType Directory -Force $publish | Out-Null
     # Static CRT for our native helper; WinUI runtime CRT is bundled below.
-    cmake -S native -B $nativeBuild -A x64 -DBUILD_TESTING=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+    cmake -S native -B $nativeBuild -A x64 -DBUILD_TESTING=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
     if ($LASTEXITCODE -ne 0) { throw 'Native configuration failed' }
-    cmake --build $nativeBuild --config Release --parallel 2
+    cmake --build $nativeBuild --config Release --parallel 2 --target riffine-audio riffine-decode-test
     if ($LASTEXITCODE -ne 0) { throw 'Native build failed' }
+    ctest --test-dir $nativeBuild -C Release -R '^streaming-codec-coordinates$' --output-on-failure
+    if ($LASTEXITCODE -ne 0) { throw 'Native codec validation failed' }
     dotnet publish desktop/windows/Riffine.Windows.csproj -c Release -r win-x64 --self-contained true -p:Platform=x64 -p:RestoreLockedMode=true "-p:Version=$Version" -o $publish
     if ($LASTEXITCODE -ne 0) { throw 'WinUI publish failed' }
     if (-not (Test-Path (Join-Path $publish 'Riffine.Windows.pri'))) { throw 'WinUI publish omitted the application resource index' }

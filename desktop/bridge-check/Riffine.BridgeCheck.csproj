@@ -8,5 +8,6 @@
   <ItemGroup>
     <Compile Include="../windows/CoreClient.cs" Link="CoreClient.cs" />
     <Compile Include="../windows/Models.cs" Link="Models.cs" />
+    <Compile Include="../windows/MusicLibrary.cs" Link="MusicLibrary.cs" />
   </ItemGroup>
 </Project>
