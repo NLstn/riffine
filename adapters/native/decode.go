@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"os/exec"
+	"slices"
 	"strconv"
 	"sync"
 
@@ -47,10 +48,14 @@ func NewDecoder(ctx context.Context, adapter Adapter) (Decoder, error) {
 	if err = json.Unmarshal(data, &report); err != nil {
 		return result, err
 	}
-	if report.ABI != 1 || !report.BorrowedSources || len(report.Formats) != 3 || report.Formats[0] != "wav-pcm" || report.Formats[1] != "flac" || report.Formats[2] != "mp3" {
+	if report.ABI != 1 || !report.BorrowedSources || !supportedFormats(report.Formats) {
 		return result, errors.New("native decoder protocol/capabilities are unsupported; rebuild the helper with borrowed-source support")
 	}
 	return Decoder{adapter: adapter, formats: append([]string(nil), report.Formats...), borrowedPreview: report.BorrowedPreview, borrowedRender: report.BorrowedRender, scheduledControl: report.ScheduledControl, scheduledCues: report.ScheduledCues}, nil
+}
+func supportedFormats(formats []string) bool {
+	return slices.Equal(formats, []string{"wav-pcm", "flac", "mp3"}) ||
+		slices.Equal(formats, []string{"wav-pcm", "flac", "mp3", "aac", "alac"})
 }
 func (d Decoder) Formats() []string { return append([]string(nil), d.formats...) }
 func (a Adapter) capture(ctx context.Context, args ...string) ([]byte, error) {
@@ -109,7 +114,7 @@ func (d Decoder) Inspect(ctx context.Context, r resource.Reader) (audio.Info, er
 	if dec.Decode(&extra) != io.EOF {
 		return audio.Info{}, errors.New("unexpected decoder metadata")
 	}
-	if info.Encoding != "flac" && info.Encoding != "mp3" {
+	if info.Encoding == "wav-pcm" || !slices.Contains(d.formats, info.Encoding) {
 		return audio.Info{}, errors.New("native decoder returned an unexpected source codec")
 	}
 	info.SHA256, err = audio.Fingerprint(ctx, r)
