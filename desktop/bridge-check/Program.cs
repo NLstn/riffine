@@ -18,6 +18,8 @@ try
     using var core = new CoreClient(args.Length == 1 ? args[0] : null);
     var hello = await core.SendAsync(new { version = 1, type = "hello" });
     Require(hello.Formats?.Contains("wav-pcm") == true, "handshake format capabilities");
+    if (args.Length == 1)
+        Require(hello.StreamPreview && hello.Formats!.Contains("flac") && hello.Formats.Contains("mp3"), "installed native audio helper capabilities");
     var imported = await core.SendAsync(new { version = 1, type = "import", source, document });
     Require(imported.Snapshot is { Sequence: 0 } && imported.Snapshot.Project.Track.Audio.Frames == 4000, "imported metadata");
     var changed = await core.SendAsync(new
@@ -26,6 +28,13 @@ try
         command = new { version = 1, sequence = 1, type = "set_parameters", speed = .75, pitch = -2 }
     });
     Require(changed.Snapshot?.Project.Settings.Speed == .75, "parameter edit");
+    var phrase = new PracticeLoop(true, .1, .4);
+    var looped = await core.SendAsync(new
+    {
+        version = 1, type = "command",
+        command = new { version = 1, sequence = 2, type = "set_loop", loop = phrase }
+    });
+    Require(looped.Snapshot?.Project.Settings.Loop == phrase, "source-time phrase edit");
     using (var cancelled = new CancellationTokenSource())
     {
         cancelled.Cancel();
@@ -39,12 +48,13 @@ try
     }
     catch (IOException) { }
     var retained = await core.SendAsync(new { version = 1, type = "snapshot" });
-    Require(retained.Snapshot is { Sequence: 1 } && retained.Snapshot.Project.Settings.Pitch == -2, "failed replacement retained session");
+    Require(retained.Snapshot is { Sequence: 2 } && retained.Snapshot.Project.Settings.Pitch == -2, "failed replacement retained session");
     var window = await core.SendAsync(new { version = 1, type = "waveform", startFrame = 0, endFrame = 4000, bins = 40 });
     Require(window.Window is { Cells.Length: > 0 }, "native waveform response");
     await core.SendAsync(new { version = 1, type = "save_as", document });
     var reopened = await core.SendAsync(new { version = 1, type = "open", document });
     Require(reopened.Snapshot is { Sequence: 0 } && reopened.Snapshot.Project.Settings.Speed == .75, "saved project reopened");
+    Require(reopened.Snapshot?.Project.Settings.Loop == phrase, "saved phrase reopened");
     Console.WriteLine("C# / Go bridge passed: handshake, Unicode import, edits, cancellation, failed replacement, waveform, save and reopen.");
 }
 finally { Directory.Delete(directory, recursive: true); }

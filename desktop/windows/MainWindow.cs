@@ -69,7 +69,10 @@ public sealed class MainWindow : Window
             await core.SendAsync(new { version = 1, type = "preview" }, token);
             status.Text = "Preview finished.";
         }, "Previewing the selection…"));
-        preview.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
+        // Theme styles may not be materialized before the first window loads.
+        // Local colors give the primary action its accent without that lookup.
+        preview.Background = AccentBrush;
+        preview.Foreground = BackgroundBrush;
         apply = Action("Apply settings", () => RunAsync(async token =>
         {
             await CommitSettingsAsync(token);
@@ -95,6 +98,7 @@ public sealed class MainWindow : Window
         AppWindow.Closing += async (_, e) =>
         {
             if (closeApproved) return;
+            if (!busy && !dirty && !dialogOpen) { closeApproved = true; return; }
             e.Cancel = true;
             if (closing || dialogOpen) return;
             closing = true;
@@ -102,7 +106,13 @@ public sealed class MainWindow : Window
             {
                 operation?.Cancel();
                 if (operationFinished is { } pending) await pending.Task;
-                if (await ConfirmChangesAsync()) { closeApproved = true; Close(); }
+                if (await ConfirmChangesAsync())
+                {
+                    closeApproved = true;
+                    // Finish the current Closing event before asking WinUI to
+                    // close again after an asynchronous save/discard decision.
+                    DispatcherQueue.TryEnqueue(() => Close());
+                }
             }
             finally { closing = false; }
         };
