@@ -100,8 +100,9 @@ with `./scripts/build-windows.ps1 -Installer`; the **Native Windows app** workfl
 also produces an installer download. Explicit `windows-vMAJOR.MINOR.PATCH` tags
 publish Windows prereleases on GitHub.
 
-This initial client still needs Windows UI/installer/hardware acceptance and
-native continuous-transport integration. See the
+Automated Windows build/install/startup/uninstall checks pass. This initial client
+still needs interactive Windows UI/hardware acceptance and native continuous
+transport integration. See the
 [Windows build guide and scope](docs/validation/native-windows-app.md) and
 [native-client decision](docs/adr/0006-native-windows-client.md).
 
