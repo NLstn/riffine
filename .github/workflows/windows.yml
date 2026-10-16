@@ -1,0 +1,104 @@
+name: Native Windows app
+
+on:
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'cmd/riffine-desktop/**'
+      - 'internal/desktop/**'
+      - 'adapters/**'
+      - 'core/**'
+      - 'native/**'
+      - 'scripts/build-windows.ps1'
+      - 'scripts/check-windows-package.ps1'
+      - '.github/workflows/windows.yml'
+  push:
+    branches: [main]
+    tags: ['windows-v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Installer version (major.minor.patch)
+        default: '0.1.0'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.24.x'
+          cache: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Check desktop control and lifecycle
+        run: go test ./internal/desktop
+      - name: Check actual C# to Go process binding
+        shell: pwsh
+        run: |
+          dotnet build desktop/bridge-check/Riffine.BridgeCheck.csproj -c Release -o build/windows/bridge-check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go build -trimpath -o build/windows/bridge-check/riffine-desktop.exe ./cmd/riffine-desktop
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet build/windows/bridge-check/Riffine.BridgeCheck.dll
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build native app and installer
+        shell: pwsh
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          $version = if ($env:INPUT_VERSION) { $env:INPUT_VERSION } else { '0.1.0' }
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $version = $env:GITHUB_REF_NAME -replace '^windows-v', ''
+          }
+          ./scripts/build-windows.ps1 -Version $version -Installer
+      - name: Install, launch native window and uninstall
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem build/windows/installer/*-setup.exe | Select-Object -First 1
+          ./scripts/check-windows-package.ps1 -Setup $setup.FullName
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: riffine-windows-install-check
+          path: build/windows/smoke/*.log
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: riffine-windows-x64-installer
+          path: build/windows/installer/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: riffine-windows-x64-app
+          path: build/windows/publish/
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/windows-v')
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: riffine-windows-x64-installer
+          path: installer
+      - name: Publish Windows prerelease downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" installer/* --verify-tag --prerelease --title "Riffine $GITHUB_REF_NAME" --notes-file desktop/windows/release-notes.md

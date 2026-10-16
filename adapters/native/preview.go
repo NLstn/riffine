@@ -54,6 +54,7 @@ func (a Adapter) Preview(ctx context.Context, r engine.PreviewRequest) (engine.P
 	cmd := exec.CommandContext(ctx, a.Executable, "preview", r.Source,
 		strconv.FormatInt(r.StartFrame, 10), strconv.FormatInt(r.EndFrame, 10),
 		strconv.FormatFloat(r.Speed, 'g', -1, 64), strconv.FormatFloat(r.Pitch, 'g', -1, 64), mode)
+	configureHelper(cmd)
 	return a.runPreview(ctx, r, cmd, mode)
 }
 

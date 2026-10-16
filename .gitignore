@@ -8,6 +8,10 @@
 /web/node_modules/
 /web/dist/
 /web/*.tsbuildinfo
+/desktop/windows/bin/
+/desktop/windows/obj/
+/desktop/bridge-check/bin/
+/desktop/bridge-check/obj/
 
 /web/public/practice/core.wasm
 /web/public/practice/wasm_exec.js

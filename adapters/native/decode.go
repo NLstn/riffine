@@ -58,6 +58,7 @@ func (a Adapter) capture(ctx context.Context, args ...string) ([]byte, error) {
 		return nil, errors.New("native helper path is empty")
 	}
 	cmd := exec.CommandContext(ctx, a.Executable, args...)
+	configureHelper(cmd)
 	var output cappedOutput
 	output.limit = 4096
 	cmd.Stdout = &output

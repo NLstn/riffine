@@ -91,6 +91,20 @@ sh scripts/test.sh --native
 The scripts put both executables in `bin/` and dependency licenses in `licenses/`.
 Alternatively set `RIFFINE_AUDIO_HELPER` to the full `riffine-audio` executable path.
 
+## Native Windows application
+
+The first native Windows client uses WinUI 3 and C# with the shared Go core and
+C++ audio helper. It provides a local music list, waveform/phrase selection,
+speed/pitch settings, project saves and single-pass preview. Build on Windows
+with `./scripts/build-windows.ps1 -Installer`; the **Native Windows app** workflow
+also produces an installer download. Explicit `windows-vMAJOR.MINOR.PATCH` tags
+publish Windows prereleases on GitHub.
+
+This initial client still needs Windows UI/installer/hardware acceptance and
+native continuous-transport integration. See the
+[Windows build guide and scope](docs/validation/native-windows-app.md) and
+[native-client decision](docs/adr/0006-native-windows-client.md).
+
 ## Try a practice session
 
 Use `./bin/riffine.exe` instead of `./bin/riffine` on Windows.
