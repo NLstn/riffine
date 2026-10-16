@@ -46,8 +46,9 @@ installation is required.
 The **Native Windows app** GitHub Actions workflow builds the same app and setup
 program on Windows. Main/PR/manual runs retain the setup in the
 `riffine-windows-x64-installer` artifact. Publish a Windows alpha by pushing an
-explicit `windows-v0.1.0` tag after checking the build and acceptance items below;
+explicit `windows-v0.1.0` tag after automated installer acceptance passes;
 the tag workflow attaches the setup and `SHA256SUMS.txt` to a GitHub prerelease.
+The remaining manual and feature acceptance below gates a supported release.
 Builds are unsigned until a code-signing identity is configured.
 
 ## Protocol and evidence
@@ -78,14 +79,22 @@ checks pass; the desktop host cross-compiles for Windows x64. The actual C#
 client-to-Go process check passes for handshake, Unicode-path import, editing,
 already-cancelled requests, failed replacement, waveform queries, exclusive save
 and reopening. All C# sources type-check against the restored WinUI references.
-The macOS app build stops at Microsoft's Windows-only XAML compiler. The first
-Windows CI run successfully compiled/published the complete WinUI client and
-native helper; installer and native-window acceptance are tracked separately.
+The macOS app build stops at Microsoft's Windows-only XAML compiler. The
+[Windows acceptance run](https://github.com/NLstn/riffine/actions/runs/38937983576)
+compiled the complete WinUI app, built and installed its setup executable,
+verified the installed C#↔Go bridge and actual native helper capabilities
+(WAV/FLAC/MP3 and streaming preview), loaded a native WinUI window, closed it and
+uninstalled successfully. The application PRI is explicitly published because
+the SDK's unpackaged publish path omits it; both build and installed-package
+checks require that resource index. See
+[Windows App SDK issue 6720](https://github.com/microsoft/WindowsAppSDK/issues/6720).
+Local native-backed validation also passes all 11 processing checks, the full Go
+suite and `go vet` after rebuilding the helper.
 
 ## Outstanding acceptance
 
-- WinUI compilation and startup on a Windows runner, followed by clean-machine
-  install, launch, upgrade and uninstall checks.
+- Upgrade acceptance across future installer versions; fresh install, startup,
+  close and uninstall are covered by the Windows runner.
 - Native file picker behavior, unsaved-change prompts, project revision conflicts,
   Unicode/long paths and source relinking workflow on Windows.
 - DPI scaling, narrow-window layout, keyboard/screen-reader use and waveform
