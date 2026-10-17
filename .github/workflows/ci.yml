@@ -64,6 +64,9 @@ jobs:
         run: GOOS=js GOARCH=wasm go test -exec "$(go env GOROOT)/lib/wasm/go_js_wasm_exec" -run 'TestCue|TestSavedBeat|TestPauseResumeCue|TestUnsupportedCueHost|TestOriginalTempo|TestEndMarker' ./core/engine ./core/project ./core/practice ./core/timing
       - name: Check durable browser projects and complete offline cache
         run: |
+          node scripts/check-library-import.mjs
+          node scripts/check-browser-analysis-cache.mjs
+          node scripts/check-browser-peak-cache.mjs
           node scripts/check-browser-storage.mjs
           node scripts/check-browser-saved-projects.mjs
           node scripts/check-browser-offline.mjs

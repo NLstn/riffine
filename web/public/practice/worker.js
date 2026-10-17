@@ -25,6 +25,7 @@ self.onmessage = (event) => {
     try { const preview = await import('./preview-worker.mjs'); await preview.ready; self.riffineCodecOpen = (await codecReady).openCodec; self.riffinePreviewRun = preview.run; const live = await import('./live-worker.mjs'); liveReceive = live.receive; self.riffineLiveOpen = live.open; console.info(`${diagnosticPrefix} processing assets ready`); } catch (error) { self.riffinePreviewRun = undefined; console.warn(`${diagnosticPrefix} processing assets unavailable`, error); }
     self.riffineProjectStoreRun = (await storeReady).runProjectStore;
     self.riffinePeakCacheRun = (await storeReady).runPeakCache;
+    self.riffineAnalysisCacheRun = (await storeReady).runAnalysisCache;
     await codecReady;
     console.info(`${diagnosticPrefix} loading shared core`);
     const response = await fetch('./core.wasm');

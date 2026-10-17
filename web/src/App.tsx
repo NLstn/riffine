@@ -1,6 +1,6 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
-import { chooseFolder, formatDuration, indexFiles } from "./library";
+import { chooseFolder, formatDuration, indexFiles, isMusicFile, pendingTrack } from "./library";
 import type { MusicTrack } from "./library";
 import PracticeWorkspace from "./PracticeWorkspace";
 import OfflineStatus from "./OfflineStatus";
@@ -9,6 +9,12 @@ const supportedSource = (file: File) =>
   /\.(wav|wave|mp3|flac|m4a|opus|ogg|oga)$/i.test(file.name);
 
 export default function App() {
+  const importController = useRef<AbortController | undefined>(undefined);
+  const artworkUrls = useRef(new Set<string>());
+  useEffect(() => () => {
+    importController.current?.abort();
+    artworkUrls.current.forEach(url => URL.revokeObjectURL(url));
+  }, []);
   const folderInput = useRef<HTMLInputElement>(null);
   const [practiceSource, setPracticeSource] = useState<File>();
   const [practiceKey, setPracticeKey] = useState(0);
@@ -39,25 +45,42 @@ export default function App() {
     setPracticeKey((value) => value + 1);
   };
   const addFolder = async (name: string, files: File[]) => {
+    importController.current?.abort();
+    const controller = new AbortController();
+    importController.current = controller;
+    artworkUrls.current.forEach(url => URL.revokeObjectURL(url));
+    artworkUrls.current.clear();
+    const initial = files.filter(isMusicFile).map(pendingTrack);
+    setTracks(initial);
+    setProgress({ complete: 0, total: initial.length });
+    setQuery("");
     setFolderName(name);
     setIndexing(true);
     setNotice("");
     try {
-      const result = await indexFiles(files, (complete, total) =>
-        setProgress({ complete, total }),
-      );
-      setTracks(result);
+      const result = await indexFiles(files, (complete, total) => {
+        if (!controller.signal.aborted) setProgress({ complete, total });
+      }, (track, index) => {
+        if (controller.signal.aborted) {
+          if (track.artworkUrl) URL.revokeObjectURL(track.artworkUrl);
+          return;
+        }
+        if (track.artworkUrl) artworkUrls.current.add(track.artworkUrl);
+        setTracks(current => current.map((existing, row) => row === index ? track : existing));
+      }, controller.signal);
+      if (controller.signal.aborted) return;
       setNotice(
         result.length
           ? `${result.length} songs ready to practice.`
           : "No supported music files found in this folder.",
       );
     } catch {
+      if (controller.signal.aborted) return;
       setNotice(
         "The selected folder could not be read. Try choosing it again.",
       );
     } finally {
-      setIndexing(false);
+      if (!controller.signal.aborted) setIndexing(false);
     }
   };
   const openFolder = () => {
@@ -125,7 +148,6 @@ export default function App() {
               <button
                 type="button"
                 className="primary-button"
-                disabled={indexing}
                 onClick={openFolder}
               >
                 {folderName ? "Change folder" : "Choose music folder"}
@@ -146,7 +168,7 @@ export default function App() {
           />
           {indexing && (
             <p role="status">
-              Reading music tags · {progress.complete} of {progress.total}
+              Songs are ready to open. Reading tags in the background · {progress.complete} of {progress.total}
             </p>
           )}
           {notice && <p role="status">{notice}</p>}

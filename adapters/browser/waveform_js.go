@@ -35,11 +35,14 @@ func (PeakCache) Put(ctx context.Context, key string, data []byte) error {
 	return err
 }
 func peakCacheCall(ctx context.Context, method, key string, data js.Value) (js.Value, error) {
-	if js.Global().Get("riffinePeakCacheRun").Type() != js.TypeFunction {
-		return js.Undefined(), errors.New("peak storage unavailable")
+	return cacheCall(ctx, "riffinePeakCacheRun", method, key, data)
+}
+func cacheCall(ctx context.Context, bridge, method, key string, data js.Value) (js.Value, error) {
+	if js.Global().Get(bridge).Type() != js.TypeFunction {
+		return js.Undefined(), errors.New("analysis storage unavailable")
 	}
 	return awaitLive(ctx, func(done, failed js.Func) js.Value {
-		return js.Global().Call("riffinePeakCacheRun", method, key, data, done, failed)
+		return js.Global().Call(bridge, method, key, data, done, failed)
 	})
 }
 

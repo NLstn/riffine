@@ -4,7 +4,7 @@ import { parentPort, workerData } from 'node:worker_threads';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 const bytes = new Uint8Array(await readFile(workerData.source));
-let reads = 0, maxRead = 0, codecOpens = 0;
+let reads = 0, maxRead = 0, codecOpens = 0, knownInfoOpens = 0;
 class LocalFile {
  constructor(data, size = data.length) { this.bytes = data; this.size = size; this.name = workerData.name; }
  slice(start, end) { return { file: this, start, end: Math.min(end, this.size) }; }
@@ -17,21 +17,26 @@ globalThis.FileReaderSync = class {
   return result.buffer;
  }
 };
-globalThis.postMessage = data => parentPort.postMessage({ ...data, reads, maxRead, codecOpens });
+globalThis.postMessage = data => parentPort.postMessage({ ...data, reads, maxRead, codecOpens, knownInfoOpens });
 await import(pathToFileURL(workerData.loader));
-let liveReceive, projectStore;
-if (workerData.storage) {
+let liveReceive, projectStore, analysisCache;
+if (workerData.storage || workerData.analysisCache) {
  const {createRequire} = await import('node:module');
  const require = createRequire(new URL('../web/package.json',import.meta.url));
  globalThis.indexedDB = new (require('fake-indexeddb').IDBFactory)();
  const store = await import('../web/public/practice/project-store.mjs');
  projectStore = store.projectStore;
  globalThis.riffineProjectStoreRun = store.runProjectStore;
+ if (workerData.analysisCache) {
+  analysisCache = store.analysisCache;
+  globalThis.riffineAnalysisCacheRun = store.runAnalysisCache;
+  globalThis.riffinePeakCacheRun = store.runPeakCache;
+ }
 }
 if (workerData.codecs || workerData.preview || workerData.live) {
  globalThis.self = globalThis;
  const codec = await import('../web/public/practice/codec-port.mjs');
- globalThis.riffineCodecOpen = (...args) => {codecOpens++;return codec.openCodec(...args);};
+ globalThis.riffineCodecOpen = (...args) => {codecOpens++;if(args[4])knownInfoOpens++;return codec.openCodec(...args);};
 }
 if (workerData.preview || workerData.live) {
  const preview = await import('../web/public/practice/preview-worker.mjs');
@@ -44,6 +49,7 @@ const go = new globalThis.Go();
 const { instance } = await WebAssembly.instantiate(await readFile(workerData.wasm), go.importObject);
 void go.run(instance).catch(error => { throw error; });
 parentPort.on('message', data => {
+ if (data.type === 'host_analysis') { void analysisCache[data.method](...data.args).then(result => parentPort.postMessage({type:'analysis_result',id:data.id,result}), error => parentPort.postMessage({type:'analysis_result',id:data.id,error:error.message})); return; }
  if (data.type === 'host_store') { void projectStore[data.method](...data.args).then(result => parentPort.postMessage({type:'storage_result',id:data.id,result}), error => parentPort.postMessage({type:'storage_result',id:data.id,error:error.message})); return; }
  if (liveReceive?.(data)) return;
  if (data.request?.type === 'preview') globalThis.riffinePreviewQueue = data.queue;
