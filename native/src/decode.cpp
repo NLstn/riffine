@@ -6,14 +6,19 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include "windows_m4a.h"
+#include "alac_source.h"
 
 struct riffine_decoder {
  std::shared_ptr<riffine::EncodedFile> resource;
+#ifdef RIFFINE_ALAC
+ std::unique_ptr<riffine::AlacSource> alac;
+#endif
 #ifdef _WIN32
  std::unique_ptr<riffine::WindowsM4A> m4a;
 #endif
@@ -79,6 +84,9 @@ ma_result resourceSeek(ma_decoder *decoder,ma_int64 offset,ma_seek_origin origin
  return static_cast<riffine::EncodedFile *>(decoder->pUserData)->seek(offset,unsigned(origin))?MA_SUCCESS:MA_BAD_SEEK;
 }
 void finishOpen(riffine_decoder *s){
+#ifdef RIFFINE_ALAC
+ if(s->alac){s->info.channels=s->alac->channels;s->info.sample_rate=s->alac->sampleRate;s->info.encoding=5;s->info.frames=s->alac->frames;return;}
+#endif
 #ifdef _WIN32
  if(s->m4a){s->info.channels=s->m4a->channels;s->info.sample_rate=s->m4a->sampleRate;s->info.encoding=s->m4a->encoding;s->info.frames=s->m4a->frames;return;}
 #endif
@@ -89,6 +97,9 @@ void finishOpen(riffine_decoder *s){
 }
 void readExact(riffine_decoder *s,float *out,uint32_t frames){
  ma_uint64 read=0;ma_result result=MA_SUCCESS;
+#ifdef RIFFINE_ALAC
+ if(s->alac)read=s->alac->read(out,frames);else
+#endif
 #ifdef _WIN32
  if(s->m4a)read=s->m4a->read(out,frames);else
 #endif
@@ -97,12 +108,22 @@ void readExact(riffine_decoder *s,float *out,uint32_t frames){
  require(s->info.decoded_frames<=UINT64_MAX-frames,"decoded diagnostic counter overflow");s->info.decoded_frames+=frames;
  for(size_t i=0;i<size_t(frames)*s->info.channels;++i)require(std::isfinite(out[i]),"non-finite decoded sample");
 }
-#ifdef _WIN32
+#if defined(_WIN32) || defined(RIFFINE_ALAC)
 void tryM4A(riffine_decoder *s){
  if(s->opened)return;
  unsigned char header[12]{};
  if(s->resource->readAt(header,sizeof(header),0)!=sizeof(header)||std::memcmp(header+4,"ftyp",4)!=0)return;
+#ifdef RIFFINE_ALAC
+ try{s->alac=std::make_unique<riffine::AlacSource>(s->resource);return;}catch(const std::exception &){
+#ifndef _WIN32
+  throw;
+#endif
+  /* AAC uses the Windows decoder below. */
+ }
+#endif
+#ifdef _WIN32
  s->m4a=std::make_unique<riffine::WindowsM4A>(s->resource);
+#endif
 }
 #endif
 }
@@ -117,12 +138,19 @@ int riffine_decoder_open_file(const char *path,riffine_decoder **decoder,char *e
  auto result=ma_decoder_init_file(path,&config,&s->decoder);
 #endif
  if(result==MA_SUCCESS){s->opened=true;s->info.encoding=i+1;break;}}
-#ifdef _WIN32
+#if defined(_WIN32) || defined(RIFFINE_ALAC)
  if(!s->opened){
+#ifdef _WIN32
   auto file=CreateFileW(std::filesystem::u8path(path).c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
   require(file!=INVALID_HANDLE_VALUE,"cannot open original audio");
   try{s->resource=std::make_shared<riffine::EncodedFile>(uint64_t(uintptr_t(file)));}catch(...){CloseHandle(file);throw;}
-  CloseHandle(file);tryM4A(s.get());
+  CloseHandle(file);
+#else
+  auto file=::open(path,O_RDONLY);require(file>=0,"cannot open original audio");
+  try{s->resource=std::make_shared<riffine::EncodedFile>(uint64_t(file));}catch(...){::close(file);throw;}
+  ::close(file);
+#endif
+  tryM4A(s.get());
  }
 #endif
  finishOpen(s.get());
@@ -140,7 +168,7 @@ int riffine_decoder_open_handle(uint64_t handle,riffine_decoder **decoder,char *
    auto result=ma_decoder_init(resourceRead,resourceSeek,s->resource.get(),&config,&s->decoder);
    if(result==MA_SUCCESS){s->opened=true;s->info.encoding=i+1;break;}
   }
-#ifdef _WIN32
+#if defined(_WIN32) || defined(RIFFINE_ALAC)
   tryM4A(s.get());
 #endif
   finishOpen(s.get());if(s->info.encoding<3){ResourceHeader header{*s->resource};s->info.source_bits=precision(header,s->info.encoding);}
@@ -149,6 +177,10 @@ int riffine_decoder_open_handle(uint64_t handle,riffine_decoder **decoder,char *
 }
 int riffine_decoder_info_get(const riffine_decoder *s,riffine_decoder_info *info,char *error,size_t size){return boundary(error,size,[&]{require(s&&info,"decoder and info required");*info=s->info;});}
 int riffine_decoder_seek(riffine_decoder *s,uint64_t frame,char *error,size_t size){return boundary(error,size,[&]{require(s&&!s->failed&&frame<=s->info.frames,"invalid decoder seek");s->failed=true;
+#ifdef RIFFINE_ALAC
+ if(s->alac){s->alac->rewind();for(uint64_t done=0;done<frame;){auto n=uint32_t(std::min<uint64_t>(8192,frame-done));readExact(s,s->scratch.data(),n);done+=n;}}
+ else
+#endif
 #ifdef _WIN32
  if(s->m4a){s->m4a->rewind();for(uint64_t done=0;done<frame;){auto n=uint32_t(std::min<uint64_t>(8192,frame-done));readExact(s,s->scratch.data(),n);done+=n;}}
  else

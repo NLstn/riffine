@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"slices"
 	"testing"
 	"time"
 
@@ -13,7 +15,7 @@ import (
 	"github.com/NLstn/riffine/core/engine"
 )
 
-func TestWindowsM4A(t *testing.T) {
+func TestNativeM4A(t *testing.T) {
 	helper := os.Getenv("RIFFINE_AUDIO_HELPER")
 	if helper == "" {
 		t.Skip("set RIFFINE_AUDIO_HELPER for Windows M4A integration")
@@ -26,6 +28,12 @@ func TestWindowsM4A(t *testing.T) {
 			decoder, err := NewDecoder(ctx, adapter)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if !slices.Contains(decoder.Formats(), fixture.encoding) {
+				if runtime.GOOS == "windows" {
+					t.Fatal("Windows helper omitted M4A codec", fixture.encoding)
+				}
+				t.Skip("codec not enabled on this host")
 			}
 			data, err := os.ReadFile(filepath.Join("../../native/testdata", "generated-stereo."+fixture.suffix))
 			if err != nil {

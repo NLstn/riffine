@@ -63,6 +63,8 @@ jobs:
   windows:
     runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      RUSTUP_TOOLCHAIN: '1.90.0'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -72,6 +74,8 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
+      - name: Set up pinned ALAC build toolchain and runtime notices
+        run: rustup toolchain install 1.90.0 --profile minimal --component rust-docs
       - name: Check desktop control and lifecycle
         run: go test ./internal/desktop
       - name: Check actual C# to Go process binding
@@ -97,7 +101,7 @@ jobs:
         shell: pwsh
         run: |
           $env:RIFFINE_AUDIO_HELPER = (Resolve-Path build/windows/publish/riffine-audio.exe).Path
-          go test ./adapters/native -run '^TestWindowsM4A$' -v
+          go test ./adapters/native -run '^TestNativeM4A$' -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install, launch native window and uninstall
         shell: pwsh

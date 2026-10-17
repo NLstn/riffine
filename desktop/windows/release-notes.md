@@ -12,7 +12,7 @@ its SHA-256 checksum. This alpha is unsigned.
 Preview plays the selected range once; change settings between previews.
 Continuous looping, pause/seek, live changes, volume/mute and full feature parity
 with the web app remain in development. M4A supports unprotected AAC and Apple
-Lossless audio through Windows media components; Windows N requires the Media
-Feature Pack. Unsupported audio formats are reported when scanning folders.
+Lossless audio. AAC uses Windows media components (Windows N requires the Media
+Feature Pack); Apple Lossless decoding is bundled. Unsupported audio formats are reported when scanning folders.
 Opus remains unavailable in this native build. Physical-device and accessibility acceptance
 remain outstanding.

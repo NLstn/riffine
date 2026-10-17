@@ -20,7 +20,10 @@ int main(){
   fs::create_directories(root);
   std::vector<const char *> extensions={"flac","mp3"};
 #ifdef _WIN32
-  extensions.push_back("m4a");extensions.push_back("alac.m4a");
+  extensions.push_back("m4a");
+#endif
+#ifdef RIFFINE_ALAC
+  extensions.push_back("alac.m4a");
 #endif
   for(const char *extension:extensions){
    std::cout<<"Checking "<<extension<<std::endl;
