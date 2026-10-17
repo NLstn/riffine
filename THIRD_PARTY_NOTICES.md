@@ -24,7 +24,8 @@ must add a complete dependency inventory.
 
 Windows installers include the exact unmodified ALAC dependency sources and
 license texts in `licenses/alac-sources/`, the Cargo manifest/lockfile needed to
-rebuild them, and Rust's complete copyright notices in `licenses/rust-copyright.html`.
+rebuild them, and Rust's complete copyright notices in `licenses/rust/COPYRIGHT.html`
+with their referenced license texts alongside them.
 Riffine's ALAC adapter is MIT licensed and lives in `native/alac/src/lib.rs`.
 
 The Windows build also collects the restored runtime packages' complete license

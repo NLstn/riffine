@@ -12,7 +12,7 @@ try {
     foreach ($name in @('Riffine.Windows.exe', 'Riffine.Windows.pri', 'riffine-desktop.exe', 'riffine-audio.exe', 'vcruntime140.dll', 'licenses')) {
         if (-not (Test-Path (Join-Path $installDirectory $name))) { throw "Installed package is missing $name" }
     }
-    foreach ($name in @('alac-sources/Cargo.lock', 'alac-sources/MPL-2.0.txt', 'alac-sources/symphonia-0.5.5/src/lib.rs', 'rust-copyright.html')) {
+    foreach ($name in @('alac-sources/Cargo.lock', 'alac-sources/MPL-2.0.txt', 'alac-sources/symphonia-0.5.5/src/lib.rs', 'rust/COPYRIGHT.html', 'rust/licenses')) {
         if (-not (Test-Path (Join-Path $installDirectory "licenses/$name"))) { throw "Installed package is missing ALAC notices/source: $name" }
     }
     # Verify the installed Go host, helper handshake and C# protocol together.

@@ -96,7 +96,7 @@ jobs:
           cache: false
       - if: runner.os == 'Windows'
         name: Set up pinned ALAC toolchain and runtime notices
-        run: rustup toolchain install 1.90.0 --profile minimal --component rust-docs
+        run: rustup toolchain install 1.90.0 --profile minimal
       - run: cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build/native --config Release
       - run: ctest --test-dir build/native -C Release --output-on-failure --no-tests=error

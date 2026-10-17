@@ -75,7 +75,7 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - name: Set up pinned ALAC build toolchain and runtime notices
-        run: rustup toolchain install 1.90.0 --profile minimal --component rust-docs
+        run: rustup toolchain install 1.90.0 --profile minimal
       - name: Check desktop control and lifecycle
         run: go test ./internal/desktop
       - name: Check actual C# to Go process binding
