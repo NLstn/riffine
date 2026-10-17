@@ -43,7 +43,7 @@ installed C# import/save/reopen using the generated M4A fixtures.
 
 ## Build on Windows
 
-Install .NET 10 SDK, Go 1.24+, Rust 1.90+ (including rust-docs), CMake 3.24+, Git, and Visual Studio 2022 C++ build
+Install .NET 10 SDK, Go 1.24+, Rust 1.90+, CMake 3.24+, Git, and Visual Studio 2022 C++ build
 tools or newer (Desktop development with C++ and a Windows SDK). Inno Setup 6 is needed
 only for the installer. Run from PowerShell 7:
 
