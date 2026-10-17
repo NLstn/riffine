@@ -2,11 +2,16 @@
 // Reads original File slices; retains one compressed packet and one PCM block.
 export class MediaDecoder {
  static async open(source, codec, knownInfo) {
-  const [{default: LibAV}, {default: factory}] = await Promise.all([
+  const [{default: LibAV}, {default: factory}] = await (codec===3 ? Promise.all([
    import('./media/libav.mjs'), import('./media/factory.mjs'),
-  ]);
-  LibAV.LibAVFactory = () => factory({wasmMemory: new WebAssembly.Memory({initial:512, maximum:1024})});
-  const av = await LibAV.LibAV({noworker:true, nosimd:true, nothreads:true});
+  ]) : Promise.all([
+   import('./media/opus-libav.mjs'), import('./media/opus-factory.mjs'),
+  ]));
+  const boundedFactory = () => codec===3
+   ? factory({wasmMemory: new WebAssembly.Memory({initial:512, maximum:1024})})
+   : factory(); // 6.x allocator limit is applied when packaging the module.
+  LibAV.LibAVFactory = boundedFactory; // 4.x factory override
+  const av = await LibAV.LibAV({noworker:true, nosimd:true, nothreads:true, factory:boundedFactory});
   const cursor = new MediaDecoder(av, codec);
   try {
    if (knownInfo) {
@@ -85,7 +90,9 @@ export class MediaDecoder {
  async next() {
   const av=this.av;
   while (!this.eof) {
-   const [status, packets]=await av.ff_read_multi(this.format, this.packet, undefined, {limit:1});
+   const [status, packets]=await (this.codec===3
+    ? av.ff_read_multi(this.format, this.packet, undefined, {limit:1})
+    : av.ff_read_frame_multi(this.format, this.packet, {limit:1}));
    if (status!==-av.EAGAIN && status!==av.AVERROR_EOF) throw new Error('Media is corrupt or truncated.');
    this.eof=status===av.AVERROR_EOF;
    const input=packets[this.stream.index]??[];

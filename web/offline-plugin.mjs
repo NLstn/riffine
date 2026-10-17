@@ -24,7 +24,7 @@ export default function offlinePlugin() {
    await visit(output); files.sort();
    // Fail the production build when an apparently installable app is missing
    // its actual control or processing engine. Editing-only dev stays available.
-   for (const asset of ['index.html','practice/core.wasm','practice/wasm_exec.js','practice/dsp.mjs','practice/riffine-browser-dsp.wasm','practice/media/libav.mjs','practice/media/factory.mjs']) {
+   for (const asset of ['index.html','practice/core.wasm','practice/wasm_exec.js','practice/dsp.mjs','practice/riffine-browser-dsp.wasm','practice/media/libav.mjs','practice/media/factory.mjs','practice/media/opus-libav.mjs','practice/media/opus-factory.mjs']) {
     if (!files.includes(asset)) throw new Error(`Offline practice requires ${asset}. Run the browser core/DSP build scripts first.`);
    }
    const hash = createHash('sha256'), hashes = {};

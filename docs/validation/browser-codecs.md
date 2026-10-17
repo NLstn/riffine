@@ -43,14 +43,17 @@ support uses pinned WASM decoders and does not depend on browser codec availabil
 
 ### M4A and Opus worker
 
-A pinned libav.js 4.10.6 fat variant (FFmpeg 6.1.1, libopus 1.4) handles the new
-containers/codecs. `npm run dev`/`build` packages the decoder plus its complete
-license inventory and corresponding sources. The decoder loads locally only
+A pinned libav.js 6.10.9 opus variant (FFmpeg 9.0, libopus 1.6.1) handles Ogg
+Opus. Upstream 6.x binaries omit AAC/ALAC, so the explicit `libav-m4a` npm alias
+retains the pinned 4.10.6 fat variant (FFmpeg 6.1.1) for M4A compatibility.
+`npm run dev`/`build` packages both decoders plus their complete license inventories
+and separate corresponding-source trees. The selected decoder loads locally only
 when opening M4A or Opus; no audio or decoder code is fetched from a CDN.
 
 The block-reader device borrows the same original File and serves slices of at
 most 64 KiB. It reads one compressed packet at a time, decodes at most 8192 frames
-per block, and caps its WASM heap at 64 MiB. MP4 indexing also consumes that heap;
+per block, and caps its WASM allocator at 64 MiB (imported memory for 4.x;
+the checked `getHeapMax` packaging adaptation for 6.x). MP4 indexing also consumes that heap;
 files exceeding its capacity fail. An initial bounded-memory decode counts actual
 frames without retaining whole-song PCM. AAC delay metadata and the MP4 end
 exclude encoder padding; libopus applies pre-skip and the final granule. The
