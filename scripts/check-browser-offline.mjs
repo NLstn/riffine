@@ -7,6 +7,9 @@ const constant=name=>JSON.parse(generated.match(new RegExp(`^const ${name} = (.*
 const base=constant('BASE'), assets=constant('ASSETS'), shell=constant('SHELL'), hashes=constant('HASHES');
 const pathFor=file=>base+file;
 for(const file of ['index.html','practice/core.wasm','practice/dsp.mjs','practice/riffine-browser-dsp.wasm','practice/media/libav-4.10.6.1.1-fat.wasm.wasm','practice/project-store.mjs'])assert(assets.includes(pathFor(file)),file);
+const {default:opusLibAV}=await import('../web/public/practice/media/opus-libav.mjs');
+assert(assets.includes(pathFor(`practice/media/libav-${opusLibAV.VER}-opus.wasm.wasm`)),'upgraded Opus decoder must be available offline');
+for(const codec of ['m4a','opus'])assert((await readFile(new URL(`../web/dist/practice/media/sources/${codec}/libav.js.tar.xz`,import.meta.url))).length,'corresponding sources must remain packaged');
 assert(assets.every(path=>path.startsWith(base)),'assets escaped deployment scope');
 assert(!assets.some(path=>path.includes('/sources/')||path.includes('/licenses/')||path.endsWith('LICENSES.txt')||path.endsWith('SOURCES.txt')),'notices/sources must not gate startup or offline preparation');
 assert((await readFile(new URL('../web/dist/practice/licenses/THIRD_PARTY_NOTICES.md',import.meta.url),'utf8')).length,'notices must remain packaged');

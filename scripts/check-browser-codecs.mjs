@@ -14,14 +14,28 @@ const results=[];
 // Module workers expose importScripts even though calling it is forbidden.
 // The packaged factory must leave our worker message handler in place.
 const previousImportScripts=globalThis.importScripts, previousOnmessage=globalThis.onmessage;
+const previousSelf=globalThis.self;
 const receive=()=>{};
 try {
  globalThis.importScripts=()=>{throw new Error('Module worker');};
  globalThis.onmessage=receive;
+ globalThis.self={location:{href:'https://example.test/practice/codec-worker.mjs'}};
  await import('../web/public/practice/media/factory.mjs');
+ await import('../web/public/practice/media/opus-factory.mjs');
  await Promise.resolve();
  assert.equal(globalThis.onmessage,receive,'media factory replaced the codec worker message handler');
-} finally {globalThis.importScripts=previousImportScripts;globalThis.onmessage=previousOnmessage;}
+} finally {globalThis.importScripts=previousImportScripts;globalThis.onmessage=previousOnmessage;globalThis.self=previousSelf;}
+// Exercise the actual packaged 6.x allocator: a single 64 MiB allocation
+// cannot fit alongside the decoder, while smaller allocations still work.
+const {default:opusLibAV}=await import('../web/public/practice/media/opus-libav.mjs');
+const {default:opusFactory}=await import('../web/public/practice/media/opus-factory.mjs');
+const opusAV=await opusLibAV.LibAV({noworker:true,factory:opusFactory});
+try {
+ assert.equal(opusLibAV.CONFIG,'opus');
+ assert.equal(await opusAV.malloc(64*1024*1024),0,'Opus allocator exceeded the memory budget');
+ const allocation=await opusAV.malloc(1024*1024);assert(allocation,'Opus allocator failed below the budget');
+ await opusAV.free(allocation);
+} finally {opusAV.terminate();}
 const manifest=JSON.parse(await readFile('native/testdata/generated-codecs.json','utf8'));
 const formats=mediaOnly ? [['m4a',3],['alac.m4a',3],['opus',4]] : [['mp3',1],['flac',2],['m4a',3],['alac.m4a',3],['opus',4]];
 for(const [suffix,codec] of formats) {
