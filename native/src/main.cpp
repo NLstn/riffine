@@ -25,6 +25,8 @@ int run(int argc, char **argv) {
     if(argc==2 && operation=="formats") {
 #ifdef _WIN32
       std::puts(R"({"abi":1,"formats":["wav-pcm","flac","mp3","aac","alac"],"borrowedSources":true,"borrowedPreview":true,"borrowedRender":true,"scheduledControl":2,"scheduledCues":1})");
+#elif defined(RIFFINE_ALAC)
+      std::puts(R"({"abi":1,"formats":["wav-pcm","flac","mp3","alac"],"borrowedSources":true,"borrowedPreview":true,"borrowedRender":true,"scheduledControl":2,"scheduledCues":1})");
 #else
       std::puts(R"({"abi":1,"formats":["wav-pcm","flac","mp3"],"borrowedSources":true,"borrowedPreview":true,"borrowedRender":true,"scheduledControl":2,"scheduledCues":1})");
 #endif

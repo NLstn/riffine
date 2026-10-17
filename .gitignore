@@ -12,6 +12,7 @@
 /desktop/windows/obj/
 /desktop/bridge-check/bin/
 /desktop/bridge-check/obj/
+/native/alac/target/
 
 /web/public/practice/core.wasm
 /web/public/practice/wasm_exec.js

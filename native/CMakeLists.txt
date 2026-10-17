@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.24)
 project(riffine_audio LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(MSVC)
+  # Match the statically linked Rust ALAC runtime in helper and test targets.
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
+endif()
 include(FetchContent)
 # Declare transitive dependency first to override upstream's mutable tag.
 FetchContent_Declare(signalsmith-linear
@@ -22,6 +26,41 @@ add_library(riffine-dsp STATIC src/audio.cpp src/decode.cpp src/stream.cpp src/s
 target_include_directories(riffine-dsp PUBLIC include PRIVATE ${miniaudio_SOURCE_DIR})
 find_package(Threads REQUIRED)
 target_link_libraries(riffine-dsp PRIVATE signalsmith-stretch Threads::Threads)
+option(RIFFINE_ALAC "Enable the portable Apple Lossless fallback" ${WIN32})
+if(RIFFINE_ALAC)
+  find_program(CARGO_EXECUTABLE cargo REQUIRED)
+  if(WIN32)
+    set(ALAC_LIBRARY "${CMAKE_CURRENT_BINARY_DIR}/alac/release/riffine_alac.lib")
+    set(ALAC_RUSTFLAGS "-Ctarget-feature=+crt-static")
+  else()
+    set(ALAC_LIBRARY "${CMAKE_CURRENT_BINARY_DIR}/alac/release/libriffine_alac.a")
+    set(ALAC_RUSTFLAGS "")
+  endif()
+  add_custom_command(OUTPUT "${ALAC_LIBRARY}"
+    COMMAND ${CMAKE_COMMAND} -E env "RUSTFLAGS=${ALAC_RUSTFLAGS}" ${CARGO_EXECUTABLE} build
+      --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/alac/Cargo.toml" --release --locked --target-dir "${CMAKE_CURRENT_BINARY_DIR}/alac"
+    COMMAND ${CARGO_EXECUTABLE} vendor --locked --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/alac/Cargo.toml"
+      --versioned-dirs "${CMAKE_CURRENT_BINARY_DIR}/alac-sources"
+    DEPENDS alac/Cargo.toml alac/Cargo.lock alac/src/lib.rs
+    VERBATIM)
+  add_custom_target(riffine-alac-build DEPENDS "${ALAC_LIBRARY}")
+  add_library(riffine-alac STATIC IMPORTED)
+  set_target_properties(riffine-alac PROPERTIES IMPORTED_LOCATION "${ALAC_LIBRARY}")
+  add_dependencies(riffine-alac riffine-alac-build)
+  target_link_libraries(riffine-dsp PRIVATE riffine-alac)
+  target_compile_definitions(riffine-dsp PUBLIC RIFFINE_ALAC=1)
+  install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/alac-sources/" DESTINATION licenses/alac-sources)
+  install(FILES alac/Cargo.toml alac/Cargo.lock alac/MPL-2.0.txt DESTINATION licenses/alac-sources)
+  install(FILES alac/src/lib.rs DESTINATION licenses/alac-sources/src)
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE" DESTINATION licenses/alac-sources RENAME RIFFINE-LICENSE)
+  if(WIN32)
+    target_link_libraries(riffine-dsp PRIVATE userenv ws2_32 bcrypt ntdll)
+    find_program(RUSTC_EXECUTABLE rustc REQUIRED)
+    execute_process(COMMAND ${RUSTC_EXECUTABLE} --print sysroot OUTPUT_VARIABLE RUST_SYSROOT OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+    find_file(RUST_COPYRIGHT copyright.html PATHS "${RUST_SYSROOT}/share/doc/rust/html" NO_DEFAULT_PATH REQUIRED)
+    install(FILES "${RUST_COPYRIGHT}" DESTINATION licenses RENAME rust-copyright.html)
+  endif()
+endif()
 if(WIN32)
   target_link_libraries(riffine-dsp PRIVATE mfplat mfreadwrite mfuuid ole32 uuid)
 endif()

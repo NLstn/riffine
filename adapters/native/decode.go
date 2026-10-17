@@ -55,6 +55,7 @@ func NewDecoder(ctx context.Context, adapter Adapter) (Decoder, error) {
 }
 func supportedFormats(formats []string) bool {
 	return slices.Equal(formats, []string{"wav-pcm", "flac", "mp3"}) ||
+		slices.Equal(formats, []string{"wav-pcm", "flac", "mp3", "alac"}) ||
 		slices.Equal(formats, []string{"wav-pcm", "flac", "mp3", "aac", "alac"})
 }
 func (d Decoder) Formats() []string { return append([]string(nil), d.formats...) }

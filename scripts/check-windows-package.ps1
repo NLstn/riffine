@@ -12,6 +12,9 @@ try {
     foreach ($name in @('Riffine.Windows.exe', 'Riffine.Windows.pri', 'riffine-desktop.exe', 'riffine-audio.exe', 'vcruntime140.dll', 'licenses')) {
         if (-not (Test-Path (Join-Path $installDirectory $name))) { throw "Installed package is missing $name" }
     }
+    foreach ($name in @('alac-sources/Cargo.lock', 'alac-sources/MPL-2.0.txt', 'alac-sources/symphonia-0.5.5/src/lib.rs', 'rust-copyright.html')) {
+        if (-not (Test-Path (Join-Path $installDirectory "licenses/$name"))) { throw "Installed package is missing ALAC notices/source: $name" }
+    }
     # Verify the installed Go host, helper handshake and C# protocol together.
     dotnet (Join-Path $repository 'build/windows/bridge-check/Riffine.BridgeCheck.dll') $installDirectory (Join-Path $repository 'native/testdata')
     if ($LASTEXITCODE -ne 0) { throw 'Installed C# / Go bridge check failed' }

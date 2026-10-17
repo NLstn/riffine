@@ -28,7 +28,7 @@ try {
     Copy-Item build/windows/native-package/bin/riffine-audio.exe $publish
     $licenses = Join-Path $publish 'licenses'
     New-Item -ItemType Directory -Force $licenses | Out-Null
-    Copy-Item build/windows/native-package/licenses/* $licenses
+    Copy-Item build/windows/native-package/licenses/* $licenses -Recurse -Force
     Copy-Item LICENSE, THIRD_PARTY_NOTICES.md $publish
     Copy-Item docs/validation/native-windows-app.md (Join-Path $publish 'README-Windows.md')
     $goRoot = go env GOROOT
@@ -84,6 +84,7 @@ try {
         "Windows App SDK: 1.8.260209005 (complete graph in NuGet package notices)"
         "Visual C++ app-local CRT: $($vcRuntime.VersionInfo.FileVersion) / $($crt.Name)"
         "Go: $(go version)"
+        "Rust ALAC fallback: $(rustc --version) / Symphonia 0.5.5"
         ".NET SDK: $(dotnet --version)"
         ".NET runtime: $runtimeVersion"
     ) | Set-Content (Join-Path $licenses 'windows-build-inventory.txt') -Encoding utf8NoBOM

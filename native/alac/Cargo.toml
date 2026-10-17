@@ -1,0 +1,12 @@
+[package]
+name = "riffine-alac"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+symphonia = { version = "=0.5.5", default-features = false, features = ["alac", "isomp4"] }

@@ -21,8 +21,10 @@ build 19041 or later and Windows 11 on x64.
 - A self-contained app folder, per-user setup executable and SHA-256 checksum.
 
 Native format support covers PCM WAV, FLAC, MP3 and unprotected M4A containing
-AAC or Apple Lossless (ALAC). M4A uses Windows Media Foundation; Windows N
-installations need Microsoft's Media Feature Pack. Other platforms keep their
+AAC or Apple Lossless (ALAC). AAC uses Windows Media Foundation; Windows N
+installations need Microsoft's Media Feature Pack. Apple Lossless uses a pinned
+Symphonia decoder because Windows' MP4 reader does not accept all ALAC files.
+Other platforms keep their
 existing native format list. Folder scans explain which audio files were skipped
 and name the supported formats when no songs are found. Opus remains unsupported
 in the Windows client. Projects keep source audio
@@ -41,7 +43,7 @@ installed C# import/save/reopen using the generated M4A fixtures.
 
 ## Build on Windows
 
-Install .NET 10 SDK, Go 1.24+, CMake 3.24+, Git, and Visual Studio 2022 C++ build
+Install .NET 10 SDK, Go 1.24+, Rust 1.90+ (including rust-docs), CMake 3.24+, Git, and Visual Studio 2022 C++ build
 tools or newer (Desktop development with C++ and a Windows SDK). Inno Setup 6 is needed
 only for the installer. Run from PowerShell 7:
 
