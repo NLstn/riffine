@@ -5,7 +5,9 @@ package browser
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
+	"hash/crc32"
 	"io"
 	"math"
 	"sync"
@@ -18,6 +20,13 @@ import (
 // Decoder keeps original compressed identity and source-frame coordinates.
 // A separate cancellable worker owns each bounded decoding cursor.
 type Decoder struct{}
+
+// Checksum protects disposable metadata from partial/corrupt cache records.
+// The original file hash is always verified independently before lookup.
+type cachedInspection struct {
+	Info     audio.Info `json:"info"`
+	Checksum uint32     `json:"checksum"`
+}
 
 func (Decoder) Formats() []string {
 	if js.Global().Get("riffineCodecOpen").Type() == js.TypeFunction {
@@ -85,6 +94,28 @@ func (d Decoder) inspect(ctx context.Context, r resource.Reader) (audio.Info, er
 	if codec == 0 {
 		return (audio.WAVDecoder{}).Inspect(ctx, r)
 	}
+	// Verify all original bytes before consulting persistent metadata. Filenames,
+	// timestamps and project JSON never establish content identity.
+	hash, err := audio.Fingerprint(ctx, r)
+	if err != nil {
+		return audio.Info{}, err
+	}
+	key := "inspection-v1-" + hash
+	if data, cacheErr := cacheCall(ctx, "riffineAnalysisCacheRun", "get", key, js.Undefined()); cacheErr == nil && !data.IsNull() && data.Type() == js.TypeObject && data.Get("byteLength").Int() <= 4096 {
+		bytes := make([]byte, data.Get("byteLength").Int())
+		js.CopyBytesToGo(bytes, data)
+		var entry cachedInspection
+		if json.Unmarshal(bytes, &entry) == nil {
+			cached := entry.Info
+			encoded, _ := json.Marshal(cached)
+			if crc32.ChecksumIEEE(encoded) == entry.Checksum && cached.SHA256 == hash && audio.ValidateInfo(cached) == nil && codecMatches(codec, cached.Encoding) {
+				return cached, ctx.Err()
+			}
+		}
+	}
+	if err = ctx.Err(); err != nil {
+		return audio.Info{}, err
+	}
 	stream, err := openCompressed(ctx, r, codec)
 	if err != nil {
 		return audio.Info{}, err
@@ -93,12 +124,36 @@ func (d Decoder) inspect(ctx context.Context, r resource.Reader) (audio.Info, er
 	if err = stream.Close(); err != nil {
 		return audio.Info{}, err
 	}
-	info.SHA256, err = audio.Fingerprint(ctx, r)
-	if err != nil {
+	info.SHA256 = hash
+	if err = audio.ValidateInfo(info); err != nil {
 		return audio.Info{}, err
 	}
-	return info, audio.ValidateInfo(info)
+	if err = ctx.Err(); err != nil {
+		return audio.Info{}, err
+	}
+	encoded, _ := json.Marshal(info)
+	if data, encodeErr := json.Marshal(cachedInspection{Info: info, Checksum: crc32.ChecksumIEEE(encoded)}); encodeErr == nil {
+		value := js.Global().Get("Uint8Array").New(len(data))
+		js.CopyBytesToJS(value, data)
+		// Quota and storage failures never prevent opening local music.
+		_, _ = cacheCall(ctx, "riffineAnalysisCacheRun", "put", key, value)
+	}
+	return info, ctx.Err()
 }
+func codecMatches(codec int, encoding string) bool {
+	switch codec {
+	case 1:
+		return encoding == "mp3"
+	case 2:
+		return encoding == "flac"
+	case 3:
+		return encoding == "aac" || encoding == "alac"
+	case 4:
+		return encoding == "opus"
+	}
+	return false
+}
+
 func (d Decoder) OpenPCM(ctx context.Context, r resource.Reader) (audio.PCMStream, error) {
 	info, err := d.Inspect(ctx, r)
 	if err != nil {
@@ -171,8 +226,15 @@ func openCompressed(ctx context.Context, r resource.Reader, codec int) (*compres
 	if closed || file.IsUndefined() || js.Global().Get("riffineCodecOpen").Type() != js.TypeFunction {
 		return nil, errors.New("compressed decoding is unavailable; build the browser processing assets")
 	}
+	known := js.Undefined()
+	reader.owner.mu.Lock()
+	cached := reader.owner.inspection
+	reader.owner.mu.Unlock()
+	if cached != nil && codecMatches(codec, cached.Encoding) {
+		known = js.ValueOf(map[string]any{"encoding": cached.Encoding, "sampleRate": cached.SampleRate, "channels": cached.Channels, "frames": float64(cached.Frames), "bits": cached.Bits})
+	}
 	value, err := awaitLive(ctx, func(done, failed js.Func) js.Value {
-		return js.Global().Call("riffineCodecOpen", file, codec, done, failed)
+		return js.Global().Call("riffineCodecOpen", file, codec, done, failed, known)
 	})
 	if err != nil {
 		return nil, err

@@ -1,3 +1,5 @@
+import type { TrackTags } from './music-cache';
+
 export interface MusicTrack {
   id: string;
   file: File;
@@ -31,78 +33,85 @@ export function isMusicFile(file: File): boolean {
   return audioExtensions.has(extension);
 }
 
-export async function readTrack(file: File, relativePath: string): Promise<MusicTrack> {
-  const fallbackTitle = file.name.replace(/\.[^.]+$/, '');
-  try {
-    const { parseBlob } = await import('music-metadata');
-    const metadata = await parseBlob(file, { duration: true });
-    const picture = metadata.common.picture?.[0];
-    let artworkUrl: string | undefined;
-    if (picture) {
-      const artwork = new Uint8Array(picture.data.byteLength);
-      artwork.set(picture.data);
-      artworkUrl = URL.createObjectURL(new Blob([artwork.buffer], { type: picture.format }));
-    }
-
-    return {
-      id: `${relativePath}:${file.size}:${file.lastModified}`,
-      file,
-      relativePath,
-      title: metadata.common.title || fallbackTitle,
-      artist: metadata.common.artist || metadata.common.albumartist || 'Unknown artist',
-      album: metadata.common.album || 'Unknown album',
-      albumArtist: metadata.common.albumartist || metadata.common.artist || 'Unknown artist',
-      genre: metadata.common.genre?.[0],
-      year: metadata.common.year,
-      trackNumber: metadata.common.track.no ?? undefined,
-      duration: metadata.format.duration,
-      format: metadata.format.container || file.name.split('.').pop()?.toUpperCase() || 'Audio',
-      size: file.size,
-      artworkUrl,
-    };
-  } catch {
-    return {
-      id: `${relativePath}:${file.size}:${file.lastModified}`,
-      file,
-      relativePath,
-      title: fallbackTitle,
-      artist: 'Unknown artist',
-      album: 'Unknown album',
-      albumArtist: 'Unknown artist',
-      format: file.name.split('.').pop()?.toUpperCase() || 'Audio',
-      size: file.size,
-      tagError: true,
-    };
-  }
+export function pendingTrack(file: File): MusicTrack {
+  const relativePath = file.webkitRelativePath || file.name;
+  return {
+    id: `${relativePath}:${file.size}:${file.lastModified}`,
+    file, relativePath,
+    title: file.name.replace(/\.[^.]+$/, ''),
+    artist: 'Reading tags…',
+    album: '—',
+    albumArtist: 'Unknown artist',
+    format: file.name.split('.').pop()?.toUpperCase() || 'Audio',
+    size: file.size,
+  };
 }
 
+function applyTags(track: MusicTrack, tags?: TrackTags): MusicTrack {
+  return {
+    ...track,
+    title: tags?.title || track.title,
+    artist: tags?.artist || tags?.albumArtist || 'Unknown artist',
+    album: tags?.album || 'Unknown album',
+    albumArtist: tags?.albumArtist || tags?.artist || 'Unknown artist',
+    genre: tags?.genre,
+    year: tags?.year,
+    trackNumber: tags?.trackNumber,
+    duration: tags?.duration,
+    format: tags?.format || track.format,
+    artworkUrl: tags?.artwork ? URL.createObjectURL(tags.artwork) : undefined,
+    tagError: !tags,
+  };
+}
+
+// Rows are available before any IO. Two dedicated workers enrich them without
+// blocking search, opening a song, or the practice player's control worker.
 export async function indexFiles(
   files: File[],
   onProgress: (complete: number, total: number) => void,
+  onTrack: (track: MusicTrack, index: number) => void = () => {},
+  signal?: AbortSignal,
 ): Promise<MusicTrack[]> {
-  const candidates = files.filter(isMusicFile);
-  const tracks: MusicTrack[] = new Array(candidates.length);
+  const tracks = files.filter(isMusicFile).map(pendingTrack);
   let next = 0;
   let complete = 0;
-
+  onProgress(0, tracks.length);
   const worker = async () => {
-    while (true) {
-      const index = next++;
-      if (index >= candidates.length) return;
-      const file = candidates[index];
-      const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
-      tracks[index] = await readTrack(file, relativePath);
-      complete++;
-      onProgress(complete, candidates.length);
+    let reader: Worker | undefined;
+    const abort = () => reader?.terminate();
+    signal?.addEventListener('abort', abort, { once: true });
+    try {
+      while (!signal?.aborted) {
+        const index = next++;
+        if (index >= tracks.length) return;
+        let tags: TrackTags | undefined;
+        try {
+          reader ??= new Worker(new URL('./library-worker.ts', import.meta.url), { type: 'module' });
+          tags = await new Promise<TrackTags | undefined>((resolve) => {
+            const cancelled = () => finish();
+            const finish = (value?: TrackTags) => {
+              signal?.removeEventListener('abort', cancelled);
+              resolve(value);
+            };
+            signal?.addEventListener('abort', cancelled, { once: true });
+            reader!.onmessage = event => finish(event.data.tags);
+            reader!.onerror = event => { event.preventDefault(); reader?.terminate(); reader = undefined; finish(); };
+            try { reader!.postMessage(tracks[index].file); }
+            catch { reader?.terminate(); reader = undefined; finish(); }
+          });
+        } catch { reader?.terminate(); reader = undefined; }
+        if (signal?.aborted) return;
+        tracks[index] = applyTags(tracks[index], tags);
+        onTrack(tracks[index], index);
+        onProgress(++complete, tracks.length);
+      }
+    } finally {
+      reader?.terminate();
+      signal?.removeEventListener('abort', abort);
     }
   };
-
-  await Promise.all(Array.from({ length: Math.min(4, candidates.length) }, worker));
-  return tracks.sort((a, b) =>
-    a.artist.localeCompare(b.artist) || a.album.localeCompare(b.album) ||
-    (a.trackNumber ?? Number.MAX_SAFE_INTEGER) - (b.trackNumber ?? Number.MAX_SAFE_INTEGER) ||
-    a.title.localeCompare(b.title),
-  );
+  await Promise.all(Array.from({ length: Math.min(2, tracks.length) }, worker));
+  return tracks;
 }
 
 export async function chooseFolder(): Promise<FolderSelection | null> {

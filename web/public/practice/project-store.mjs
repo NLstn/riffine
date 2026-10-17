@@ -155,40 +155,50 @@ export function runProjectStore(requestJSON, document, complete, failed) {
 export const MAX_PEAK_BYTES = 4 << 20;
 export const MAX_PEAK_ENTRIES = 32;
 export class PeakCache extends ProjectStore {
- constructor(options = {}) { super({database:'riffine-peaks-v1', ...options}); }
+ constructor(options = {}) { super({database:'riffine-peaks-v1', ...options}); this.maxBytes=MAX_PEAK_BYTES; this.maxEntries=MAX_PEAK_ENTRIES; }
  async get(key, signal) {
   return this.transaction('readonly', (store, done) => {
    const request = store.get(key);
    request.onsuccess = () => {
     const data = request.result?.data;
-    done(data instanceof Uint8Array && data.byteLength <= MAX_PEAK_BYTES ? data : null);
+    done(data instanceof Uint8Array && data.byteLength <= this.maxBytes ? data : null);
    };
   }, signal);
  }
  async put(key, data, signal) {
-  if (typeof key !== 'string' || key.length > 512 || !(data instanceof Uint8Array) || data.byteLength > MAX_PEAK_BYTES) throw new Error('Invalid peak cache entry');
+  if (typeof key !== 'string' || key.length > 512 || !(data instanceof Uint8Array) || data.byteLength > this.maxBytes) throw new Error('Invalid peak cache entry');
   return this.transaction('readwrite', (store, done) => {
    store.put({id:key, data, savedAt:Date.now()});
-   // Bound persistent storage to 128 MiB, evicting the oldest generated peaks.
+   // Evict oldest entries at the per-cache limit (128 MiB for peaks).
    const entries = [];
    const request = store.openCursor();
    request.onsuccess = () => {
     const cursor = request.result;
     if (cursor) { entries.push({id:cursor.key, savedAt:cursor.value.savedAt}); cursor.continue(); return; }
     entries.sort((a,b) => b.savedAt - a.savedAt);
-    for (const entry of entries.slice(MAX_PEAK_ENTRIES)) store.delete(entry.id);
+    for (const entry of entries.slice(this.maxEntries)) store.delete(entry.id);
     done(null);
    };
   }, signal);
  }
 }
 export const peakCache = new PeakCache();
-export function runPeakCache(method, key, data, complete, failed) {
+// Versioned decoder inspection data is independently bounded and disposable.
+export class AnalysisCache extends PeakCache {
+ constructor(options = {}) {
+  super({database:'riffine-analysis-v1', ...options});
+  this.maxBytes=4096; this.maxEntries=512;
+ }
+}
+export const analysisCache = new AnalysisCache();
+export const runPeakCache = (...args) => runCache(peakCache, ...args);
+export const runAnalysisCache = (...args) => runCache(analysisCache, ...args);
+function runCache(cache, method, key, data, complete, failed) {
  const controller = new AbortController();
  const task = (async () => {
   try {
    if (method !== 'get' && method !== 'put') throw new Error('Invalid peak cache operation');
-   complete(await (method === 'get' ? peakCache.get(key, controller.signal) : peakCache.put(key, data, controller.signal)));
+   complete(await (method === 'get' ? cache.get(key, controller.signal) : cache.put(key, data, controller.signal)));
   } catch (error) { failed(String(error)); }
  })();
  return fence => {controller.abort(); void task.then(() => fence(''));};

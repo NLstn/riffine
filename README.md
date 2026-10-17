@@ -41,6 +41,26 @@ npm run dev
 The Vite development server listens on localhost. Folder access and tag reading
 run in the browser; audio files are not sent to a backend.
 
+Folder songs appear as soon as their file list is available and can be opened
+while two background workers read tags and artwork. Rows keep their positions;
+changing folders cancels the previous import. Disposable IndexedDB caches retain
+tags/artwork (256 entries), compressed-audio inspection (512 entries) and waveform
+pyramids (32 entries), separately from saved projects. Full original-file SHA-256
+hashes identify cached results, so renamed copies reuse them and changed bytes
+invalidate them. Reopening still reads the file to verify its hash, but avoids
+repeating cached duration scans and waveform decoding. Unavailable storage and
+corrupt entries fall back to fresh analysis. To bound worker memory, library tag
+hashing is limited to files up to 64 MiB and artwork to 1 MiB; larger audio still
+uses the practice core's streaming hash, inspection and waveform caches.
+
+Check folder import and cache behavior after building the browser core:
+
+```sh
+node scripts/check-library-import.mjs
+node scripts/check-browser-analysis-cache.mjs
+node scripts/check-browser-peak-cache.mjs
+```
+
 ### Hosted web version for testing
 
 Open **[Riffine on GitHub Pages](https://nlstn.github.io/riffine/)**.
